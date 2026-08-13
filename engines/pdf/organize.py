@@ -53,11 +53,32 @@ def rotate(input_path: Path, output_path: Path, degrees: int, pages: list[int] |
     return output_path
 
 
-def delete_pages(input_path: Path, output_path: Path, page_indices: list[int]) -> Path:
-    """page_indices are 0-indexed pages to remove."""
+def extract_pages(input_path: Path, output_path: Path, page_indices: list[int]) -> Path:
+    """page_indices are 0-indexed pages to copy into a new PDF."""
+    if not page_indices:
+        raise PdfEngineError("no pages selected")
+
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
     with pikepdf.open(input_path) as doc:
+        with pikepdf.new() as target:
+            for i in page_indices:
+                target.pages.append(doc.pages[i])
+            target.save(output_path)
+
+    return output_path
+
+
+def delete_pages(input_path: Path, output_path: Path, page_indices: list[int]) -> Path:
+    """page_indices are 0-indexed pages to remove."""
+    if not page_indices:
+        raise PdfEngineError("no pages selected")
+
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    with pikepdf.open(input_path) as doc:
+        if len(page_indices) >= len(doc.pages):
+            raise PdfEngineError("cannot delete every page in a PDF")
         for i in sorted(page_indices, reverse=True):
             del doc.pages[i]
         doc.save(output_path)

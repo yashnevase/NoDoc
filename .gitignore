@@ -4,9 +4,13 @@ __pycache__/
 venv/
 .pytest_cache/
 .privatepdf-data/
+.env
+frontend/.env
 node_modules/
 dist/
 build/output/
+desktop/sidecar/
+desktop/gen/
 *.log
 .DS_Store
 target/

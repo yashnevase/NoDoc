@@ -12,8 +12,10 @@ import sys
 
 import uvicorn
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.organize import router as organize_router
+from app.api.results import router as results_router
 from app.config import settings
 from app.logging_conf import configure_logging
 
@@ -21,7 +23,15 @@ configure_logging()
 logger = logging.getLogger("privatepdf.main")
 
 app = FastAPI(title="PrivatePDF Sidecar", docs_url=None, redoc_url=None)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 app.include_router(organize_router, prefix="/organize", tags=["organize"])
+app.include_router(results_router, prefix="/results", tags=["results"])
 
 
 @app.get("/health")

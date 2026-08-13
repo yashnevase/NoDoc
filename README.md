@@ -1,4 +1,4 @@
-# PrivatePDF Suite
+# NoDoc
 
 A free, offline, privacy-first PDF/document toolbox for Windows (macOS/Linux planned).
 Files never leave your device. No account, no API keys, no cloud processing.
@@ -75,8 +75,37 @@ npm run dev
 ```
 
 Then open the Vite URL shown in the terminal. The current UI is intentionally
-minimal: it can check the backend health and test PDF merge by pasting one file
-path per line.
+minimal but usable: drag/drop or browse files, choose a tool, then download the
+result file or ZIP.
+
+Current local tools:
+
+- Merge many PDFs into one PDF
+- Convert many images into one PDF
+- Split one PDF into one PDF per page
+- Convert one PDF into PNG page images
+- Extract selected pages into a new PDF
+- Delete selected pages from a PDF
+- Rotate all pages, or selected pages, in a PDF
+- Password-protect a PDF
+- Remove PDF metadata
+
+## Desktop packaging path
+
+Windows sidecar build:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\build-sidecar.ps1
+```
+
+Desktop shell build, after Rust is installed:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\build-desktop.ps1
+```
+
+Windows installer packaging will use Tauri's `msi`/`nsis` targets. macOS `.dmg`
+should be built on macOS, and Linux packages should be built on Linux.
 
 ## Development principles
 

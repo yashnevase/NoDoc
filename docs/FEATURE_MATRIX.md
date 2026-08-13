@@ -1,4 +1,4 @@
-# Feature Matrix
+# NoDoc Feature Matrix
 
 Legend — Difficulty: Low / Medium / High. Offline: all rows are Yes (that's the product requirement); "Degraded" means offline but with lower fidelity without an optional component.
 
