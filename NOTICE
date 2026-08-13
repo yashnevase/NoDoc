@@ -1,0 +1,13 @@
+PrivatePDF Suite
+Copyright (c) 2026 PrivatePDF Suite Contributors
+
+This product includes software developed by third parties, listed with their
+licenses in docs/DEPENDENCY_INVENTORY.md and THIRD_PARTY_LICENSES/. Notably:
+
+- pikepdf / qpdf (Apache-2.0)
+- pypdfium2 (Apache-2.0 / BSD-3, wraps Google's PDFium)
+- Tesseract OCR (Apache-2.0) — bundled when OCR components are installed
+- LibreOffice (MPL-2.0) — invoked as an unmodified external process for
+  Office document conversion; not statically linked or modified.
+
+Full license texts are reproduced in THIRD_PARTY_LICENSES/.
