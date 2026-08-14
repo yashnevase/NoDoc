@@ -139,6 +139,35 @@ def test_pdf_to_images_upload_succeeds_with_token(tmp_path: Path):
         assert output_path.exists()
 
 
+def test_pdf_to_text_upload_succeeds_with_token(tmp_path: Path):
+    source = make_pdf(tmp_path / "textme.pdf", 2)
+    with source.open("rb") as source_file:
+        resp = client.post(
+            "/organize/pdf-to-text-upload",
+            files=[("files", ("textme.pdf", source_file, "application/pdf"))],
+            headers={"x-privatepdf-token": settings.auth_token},
+        )
+
+    assert resp.status_code == 200
+    output_path = Path(resp.json()["output_path"])
+    assert output_path.suffix.lower() == ".txt"
+    assert output_path.exists()
+
+
+def test_pdf_to_text_path_succeeds_with_token(tmp_path: Path):
+    source = make_pdf(tmp_path / "text-path.pdf", 1)
+    resp = client.post(
+        "/organize/pdf-to-text",
+        json={"input_paths": [str(source)]},
+        headers={"x-privatepdf-token": settings.auth_token},
+    )
+
+    assert resp.status_code == 200
+    output_path = Path(resp.json()["output_path"])
+    assert output_path.suffix.lower() == ".txt"
+    assert output_path.exists()
+
+
 def test_preview_pdf_upload_succeeds_with_token(tmp_path: Path):
     source = make_pdf(tmp_path / "previewme.pdf", 2)
     with source.open("rb") as source_file:

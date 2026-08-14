@@ -82,3 +82,28 @@ def render_pdf_preview(input_path: Path, max_pages: int = 48) -> list[dict[str, 
         return pages
     finally:
         pdf.close()
+
+
+def pdf_to_text(input_path: Path, output_path: Path) -> Path:
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    try:
+        pdf = pdfium.PdfDocument(str(input_path))
+    except Exception as exc:
+        raise PdfEngineError(f"'{input_path.name}' could not be read: {exc}") from exc
+
+    page_text: list[str] = []
+    try:
+        for index in range(len(pdf)):
+            page = pdf[index]
+            textpage = page.get_textpage()
+            text = textpage.get_text_bounded().strip()
+            header = f"Page {index + 1}"
+            page_text.append(f"{header}\n{text}" if text else header)
+            textpage.close()
+            page.close()
+    finally:
+        pdf.close()
+
+    output_path.write_text("\n\n".join(page_text).strip() + "\n", encoding="utf-8")
+    return output_path

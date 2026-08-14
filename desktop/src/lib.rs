@@ -5,7 +5,11 @@ use std::{
     sync::Mutex,
 };
 
-use tauri::{path::BaseDirectory, Manager};
+use tauri::{
+    menu::{AboutMetadataBuilder, MenuBuilder, PredefinedMenuItem, SubmenuBuilder},
+    path::BaseDirectory,
+    Manager,
+};
 use uuid::Uuid;
 
 struct SidecarProcess(Mutex<Option<Child>>);
@@ -92,11 +96,52 @@ fn start_sidecar(app: &tauri::App) -> Result<(Child, u16, String), String> {
     Ok((child, port, token))
 }
 
+fn dispatch_dom_event(window: &tauri::WebviewWindow, event_name: &str) -> tauri::Result<()> {
+    window.eval(format!("window.dispatchEvent(new CustomEvent('{event_name}'));"))
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .setup(|app| {
+            let about = PredefinedMenuItem::about(
+                app,
+                Some("NoDoc"),
+                Some(
+                    AboutMetadataBuilder::new()
+                        .name(Some("NoDoc"))
+                        .version(Some("0.1.0"))
+                        .short_version(Some("0.1"))
+                        .authors(Some(vec!["yashnevase".to_string()]))
+                        .comments(Some("Local-first PDF workspace"))
+                        .website(Some("https://github.com/yashnevase/NoDoc"))
+                        .website_label(Some("Project page"))
+                        .build(),
+                ),
+            )?;
+
+            let file_menu = SubmenuBuilder::new(app, "File")
+                .text("file.open", "Open Files")
+                .text("file.clear", "Clear Workspace")
+                .separator()
+                .quit()
+                .build()?;
+
+            let view_menu = SubmenuBuilder::new(app, "View")
+                .text("view.reload", "Reload")
+                .build()?;
+
+            let help_menu = SubmenuBuilder::new(app, "Help")
+                .item(&about)
+                .text("help.about", "About NoDoc")
+                .build()?;
+
+            let menu = MenuBuilder::new(app)
+                .items(&[&file_menu, &view_menu, &help_menu])
+                .build()?;
+            menu.set_as_app_menu()?;
+
             let opened_files = opened_file_args();
             let (child, port, token) = start_sidecar(app)?;
             app.manage(SidecarProcess(Mutex::new(Some(child))));
@@ -112,6 +157,19 @@ pub fn run() {
             }
 
             Ok(())
+        })
+        .on_menu_event(|app, event| {
+            if let Some(window) = app.get_webview_window("main") {
+                if event.id() == "file.open" {
+                    let _ = dispatch_dom_event(&window, "nodoc-open-files");
+                } else if event.id() == "file.clear" {
+                    let _ = dispatch_dom_event(&window, "nodoc-clear-files");
+                } else if event.id() == "view.reload" {
+                    let _ = window.eval("window.location.reload();");
+                } else if event.id() == "help.about" {
+                    let _ = dispatch_dom_event(&window, "nodoc-about");
+                }
+            }
         })
         .run(tauri::generate_context!())
         .expect("failed to run NoDoc desktop app");

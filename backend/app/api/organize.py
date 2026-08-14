@@ -15,6 +15,7 @@ from app.services.organize_service import (
     merge_files,
     password_protect_file,
     pdf_to_images_file,
+    pdf_to_text_file,
     remove_metadata_file,
     rotate_pdf_file,
     safe_upload_output_path,
@@ -132,6 +133,17 @@ async def pdf_to_images(req: MergeRequest) -> MultiOutputResponse:
     except PdfEngineError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return MultiOutputResponse(output_paths=[str(path) for path in output_paths])
+
+
+@router.post("/pdf-to-text", response_model=ConvertResponse)
+async def pdf_to_text(req: MergeRequest) -> ConvertResponse:
+    if len(req.input_paths) != 1:
+        raise HTTPException(status_code=400, detail="pdf-to-text expects exactly one input PDF")
+    try:
+        output = pdf_to_text_file(Path(req.input_paths[0]))
+    except PdfEngineError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return ConvertResponse(output_path=str(output))
 
 
 @router.post("/preview-pdf", response_model=PreviewResponse)
@@ -278,6 +290,23 @@ async def pdf_to_images_upload(files: list[UploadFile] = File(...)) -> MultiOutp
         target_path.write_bytes(await upload.read())
         output_paths = pdf_to_images_file(target_path)
         return MultiOutputResponse(output_paths=[str(path) for path in output_paths])
+    except PdfEngineError as exc:
+        cleanup_job_dir(job_dir)
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/pdf-to-text-upload", response_model=ConvertResponse)
+async def pdf_to_text_upload(files: list[UploadFile] = File(...)) -> ConvertResponse:
+    if len(files) != 1:
+        raise HTTPException(status_code=400, detail="pdf-to-text-upload expects exactly one PDF")
+
+    job_dir = create_upload_job_dir()
+    try:
+        upload = files[0]
+        target_path = job_dir / (upload.filename or "input.pdf")
+        target_path.write_bytes(await upload.read())
+        output = pdf_to_text_file(target_path)
+        return ConvertResponse(output_path=str(output))
     except PdfEngineError as exc:
         cleanup_job_dir(job_dir)
         raise HTTPException(status_code=400, detail=str(exc)) from exc

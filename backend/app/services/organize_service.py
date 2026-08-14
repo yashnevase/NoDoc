@@ -14,6 +14,7 @@ from app.config import settings
 from engines.images.to_pdf import images_to_pdf as engine_images_to_pdf
 from engines.pdf.convert import pdf_to_images as engine_pdf_to_images
 from engines.pdf.convert import split_pdf as engine_split_pdf
+from engines.pdf.convert import pdf_to_text as engine_pdf_to_text
 from engines.pdf.organize import delete_pages as engine_delete_pages
 from engines.pdf.organize import extract_pages as engine_extract_pages
 from engines.pdf.organize import merge as engine_merge
@@ -82,6 +83,17 @@ def split_pdf_file(input_path: Path) -> list[Path]:
 def pdf_to_images_file(input_path: Path) -> list[Path]:
     output_dir = input_path.parent / "processed" / f"{input_path.stem}_images"
     return engine_pdf_to_images(input_path, output_dir)
+
+
+def pdf_to_text_file(input_path: Path) -> Path:
+    output_dir = input_path.parent / "processed"
+    output_dir.mkdir(parents=True, exist_ok=True)
+    output = output_dir / f"{input_path.stem}_text.txt"
+    n = 1
+    while output.exists():
+        output = output_dir / f"{input_path.stem}_text_{n}.txt"
+        n += 1
+    return engine_pdf_to_text(input_path, output)
 
 
 def create_upload_job_dir() -> Path:

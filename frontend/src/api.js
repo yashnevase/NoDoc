@@ -34,7 +34,7 @@ function uploadForm(files, fields = {}) {
   return form;
 }
 
-async function postUpload(path, files, fields) {
+async function postUpload(path, files, fields, options = {}) {
   const { base, token } = sidecarBase();
   const res = await fetch(`${base}${path}`, {
     method: "POST",
@@ -42,11 +42,12 @@ async function postUpload(path, files, fields) {
       "x-privatepdf-token": token,
     },
     body: uploadForm(files, fields),
+    signal: options.signal,
   });
   return readJson(res);
 }
 
-async function postJson(path, body) {
+async function postJson(path, body, options = {}) {
   const { base, token } = sidecarBase();
   const res = await fetch(`${base}${path}`, {
     method: "POST",
@@ -55,6 +56,7 @@ async function postJson(path, body) {
       "x-privatepdf-token": token,
     },
     body: JSON.stringify(body),
+    signal: options.signal,
   });
   return readJson(res);
 }
@@ -81,90 +83,98 @@ async function saveBlobResponse(res, fallbackName) {
   URL.revokeObjectURL(url);
 }
 
-export async function checkHealth() {
+export async function checkHealth(options = {}) {
   const { base } = sidecarBase();
-  const res = await fetch(`${base}/health`);
+  const res = await fetch(`${base}/health`, { signal: options.signal });
   return readJson(res);
 }
 
-export function mergeUploadedFiles(files) {
-  return postUpload("/organize/merge-upload", files);
+export function mergeUploadedFiles(files, options) {
+  return postUpload("/organize/merge-upload", files, undefined, options);
 }
 
-export function mergePathFiles(paths) {
-  return postJson("/organize/merge", { input_paths: paths });
+export function mergePathFiles(paths, options) {
+  return postJson("/organize/merge", { input_paths: paths }, options);
 }
 
-export function imagesToPdfUpload(files) {
-  return postUpload("/organize/images-to-pdf-upload", files);
+export function imagesToPdfUpload(files, options) {
+  return postUpload("/organize/images-to-pdf-upload", files, undefined, options);
 }
 
-export function imagesToPdfPaths(paths) {
-  return postJson("/organize/images-to-pdf", { input_paths: paths });
+export function imagesToPdfPaths(paths, options) {
+  return postJson("/organize/images-to-pdf", { input_paths: paths }, options);
 }
 
-export function splitPdfUpload(files) {
-  return postUpload("/organize/split-pdf-upload", files);
+export function splitPdfUpload(files, options) {
+  return postUpload("/organize/split-pdf-upload", files, undefined, options);
 }
 
-export function splitPdfPath(paths) {
-  return postJson("/organize/split-pdf", { input_paths: paths });
+export function splitPdfPath(paths, options) {
+  return postJson("/organize/split-pdf", { input_paths: paths }, options);
 }
 
-export function pdfToImagesUpload(files) {
-  return postUpload("/organize/pdf-to-images-upload", files);
+export function pdfToImagesUpload(files, options) {
+  return postUpload("/organize/pdf-to-images-upload", files, undefined, options);
 }
 
-export function pdfToImagesPath(paths) {
-  return postJson("/organize/pdf-to-images", { input_paths: paths });
+export function pdfToImagesPath(paths, options) {
+  return postJson("/organize/pdf-to-images", { input_paths: paths }, options);
 }
 
-export function previewPdfUpload(files) {
-  return postUpload("/organize/preview-pdf-upload", files);
+export function pdfToTextUpload(files, options) {
+  return postUpload("/organize/pdf-to-text-upload", files, undefined, options);
 }
 
-export function previewPdfPath(paths) {
-  return postJson("/organize/preview-pdf", { input_paths: paths });
+export function pdfToTextPath(paths, options) {
+  return postJson("/organize/pdf-to-text", { input_paths: paths }, options);
 }
 
-export function extractPagesUpload(files, pages) {
-  return postUpload("/organize/extract-pages-upload", files, { pages });
+export function previewPdfUpload(files, options) {
+  return postUpload("/organize/preview-pdf-upload", files, undefined, options);
 }
 
-export function extractPagesPath(paths, pages) {
-  return postJson(`/organize/extract-pages?pages=${encodeURIComponent(pages)}`, { input_paths: paths });
+export function previewPdfPath(paths, options) {
+  return postJson("/organize/preview-pdf", { input_paths: paths }, options);
 }
 
-export function deletePagesUpload(files, pages) {
-  return postUpload("/organize/delete-pages-upload", files, { pages });
+export function extractPagesUpload(files, pages, options) {
+  return postUpload("/organize/extract-pages-upload", files, { pages }, options);
 }
 
-export function deletePagesPath(paths, pages) {
-  return postJson(`/organize/delete-pages?pages=${encodeURIComponent(pages)}`, { input_paths: paths });
+export function extractPagesPath(paths, pages, options) {
+  return postJson(`/organize/extract-pages?pages=${encodeURIComponent(pages)}`, { input_paths: paths }, options);
 }
 
-export function rotatePdfUpload(files, degrees, pages) {
-  return postUpload("/organize/rotate-pdf-upload", files, { degrees, pages });
+export function deletePagesUpload(files, pages, options) {
+  return postUpload("/organize/delete-pages-upload", files, { pages }, options);
 }
 
-export function rotatePdfPath(paths, degrees, pages) {
-  return postJson(`/organize/rotate-pdf?degrees=${degrees}&pages=${encodeURIComponent(pages)}`, { input_paths: paths });
+export function deletePagesPath(paths, pages, options) {
+  return postJson(`/organize/delete-pages?pages=${encodeURIComponent(pages)}`, { input_paths: paths }, options);
 }
 
-export function passwordProtectUpload(files, password) {
-  return postUpload("/organize/password-protect-upload", files, { password });
+export function rotatePdfUpload(files, degrees, pages, options) {
+  return postUpload("/organize/rotate-pdf-upload", files, { degrees, pages }, options);
 }
 
-export function passwordProtectPath(paths, password) {
-  return postJson(`/organize/password-protect?password=${encodeURIComponent(password)}`, { input_paths: paths });
+export function rotatePdfPath(paths, degrees, pages, options) {
+  return postJson(`/organize/rotate-pdf?degrees=${degrees}&pages=${encodeURIComponent(pages)}`, { input_paths: paths }, options);
 }
 
-export function removeMetadataUpload(files) {
-  return postUpload("/organize/remove-metadata-upload", files);
+export function passwordProtectUpload(files, password, options) {
+  return postUpload("/organize/password-protect-upload", files, { password }, options);
 }
 
-export function removeMetadataPath(paths) {
-  return postJson("/organize/remove-metadata", { input_paths: paths });
+export function passwordProtectPath(paths, password, options) {
+  return postJson(`/organize/password-protect?password=${encodeURIComponent(password)}`, { input_paths: paths }, options);
+}
+
+export function removeMetadataUpload(files, options) {
+  return postUpload("/organize/remove-metadata-upload", files, undefined, options);
+}
+
+export function removeMetadataPath(paths, options) {
+  return postJson("/organize/remove-metadata", { input_paths: paths }, options);
 }
 
 export async function downloadResult(path) {
