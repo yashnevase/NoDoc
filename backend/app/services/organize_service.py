@@ -14,13 +14,16 @@ from app.config import settings
 from engines.images.to_pdf import images_to_pdf as engine_images_to_pdf
 from engines.pdf.convert import pdf_to_images as engine_pdf_to_images
 from engines.pdf.convert import split_pdf as engine_split_pdf
-from engines.pdf.convert import pdf_to_text as engine_pdf_to_text
+from engines.pdf.organize import add_image_watermark as engine_add_image_watermark
+from engines.pdf.organize import add_text_watermark as engine_add_text_watermark
 from engines.pdf.organize import delete_pages as engine_delete_pages
 from engines.pdf.organize import extract_pages as engine_extract_pages
 from engines.pdf.organize import merge as engine_merge
+from engines.pdf.organize import reorder_pages as engine_reorder_pages
+from engines.pdf.organize import repair as engine_repair
 from engines.pdf.organize import rotate as engine_rotate
 from engines.pdf.security import password_protect as engine_password_protect
-from engines.pdf.security import remove_metadata as engine_remove_metadata
+from engines.pdf.security import inspect_signatures as engine_inspect_signatures
 
 
 def safe_output_path(first_input: Path, suffix: str) -> Path:
@@ -70,9 +73,70 @@ def password_protect_file(input_path: Path, password: str) -> Path:
     return engine_password_protect(input_path, output, password)
 
 
-def remove_metadata_file(input_path: Path) -> Path:
-    output = safe_output_path(input_path, "metadata_removed")
-    return engine_remove_metadata(input_path, output)
+def inspect_signatures_file(input_path: Path) -> dict[str, object]:
+    return engine_inspect_signatures(input_path)
+
+
+def reorder_pages_file(input_path: Path, page_indices: list[int]) -> Path:
+    output = safe_output_path(input_path, "reordered")
+    return engine_reorder_pages(input_path, output, page_indices)
+
+
+def repair_pdf_file(input_path: Path) -> Path:
+    output = safe_output_path(input_path, "repaired")
+    return engine_repair(input_path, output)
+
+
+def add_text_watermark_file(
+    input_path: Path,
+    text: str,
+    *,
+    mode: str = "text",
+    preset: str = "verified",
+    page_indices: list[int] | None = None,
+    position: str = "center",
+    angle: float = -45.0,
+    opacity: float = 0.22,
+    size: float = 48.0,
+    color: str = "#b02730",
+) -> Path:
+    output = safe_output_path(input_path, "watermarked")
+    return engine_add_text_watermark(
+        input_path,
+        output,
+        text,
+        kind=mode,
+        badge=preset,
+        page_indices=page_indices,
+        position=position,
+        angle=angle,
+        opacity=opacity,
+        size=size,
+        color=color,
+    )
+
+
+def add_image_watermark_file(
+    input_path: Path,
+    image_path: Path,
+    *,
+    page_indices: list[int] | None = None,
+    position: str = "center",
+    angle: float = -45.0,
+    opacity: float = 0.22,
+    size: float = 48.0,
+) -> Path:
+    output = safe_output_path(input_path, "watermarked")
+    return engine_add_image_watermark(
+        input_path,
+        output,
+        image_path,
+        page_indices=page_indices,
+        position=position,
+        angle=angle,
+        opacity=opacity,
+        size=size,
+    )
 
 
 def split_pdf_file(input_path: Path) -> list[Path]:
@@ -83,17 +147,6 @@ def split_pdf_file(input_path: Path) -> list[Path]:
 def pdf_to_images_file(input_path: Path) -> list[Path]:
     output_dir = input_path.parent / "processed" / f"{input_path.stem}_images"
     return engine_pdf_to_images(input_path, output_dir)
-
-
-def pdf_to_text_file(input_path: Path) -> Path:
-    output_dir = input_path.parent / "processed"
-    output_dir.mkdir(parents=True, exist_ok=True)
-    output = output_dir / f"{input_path.stem}_text.txt"
-    n = 1
-    while output.exists():
-        output = output_dir / f"{input_path.stem}_text_{n}.txt"
-        n += 1
-    return engine_pdf_to_text(input_path, output)
 
 
 def create_upload_job_dir() -> Path:

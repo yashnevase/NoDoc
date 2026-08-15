@@ -61,6 +61,19 @@ async function postJson(path, body, options = {}) {
   return readJson(res);
 }
 
+async function postForm(path, form, options = {}) {
+  const { base, token } = sidecarBase();
+  const res = await fetch(`${base}${path}`, {
+    method: "POST",
+    headers: {
+      "x-privatepdf-token": token,
+    },
+    body: form,
+    signal: options.signal,
+  });
+  return readJson(res);
+}
+
 function fileNameFromDisposition(disposition, fallback) {
   const match = /filename="?([^"]+)"?/i.exec(disposition || "");
   return match?.[1] || fallback;
@@ -121,14 +134,6 @@ export function pdfToImagesPath(paths, options) {
   return postJson("/organize/pdf-to-images", { input_paths: paths }, options);
 }
 
-export function pdfToTextUpload(files, options) {
-  return postUpload("/organize/pdf-to-text-upload", files, undefined, options);
-}
-
-export function pdfToTextPath(paths, options) {
-  return postJson("/organize/pdf-to-text", { input_paths: paths }, options);
-}
-
 export function previewPdfUpload(files, options) {
   return postUpload("/organize/preview-pdf-upload", files, undefined, options);
 }
@@ -161,6 +166,14 @@ export function rotatePdfPath(paths, degrees, pages, options) {
   return postJson(`/organize/rotate-pdf?degrees=${degrees}&pages=${encodeURIComponent(pages)}`, { input_paths: paths }, options);
 }
 
+export function reorderPagesUpload(files, order, options) {
+  return postUpload("/organize/reorder-pages-upload", files, { order }, options);
+}
+
+export function reorderPagesPath(paths, order, options) {
+  return postJson(`/organize/reorder-pages?order=${encodeURIComponent(order)}`, { input_paths: paths }, options);
+}
+
 export function passwordProtectUpload(files, password, options) {
   return postUpload("/organize/password-protect-upload", files, { password }, options);
 }
@@ -169,12 +182,78 @@ export function passwordProtectPath(paths, password, options) {
   return postJson(`/organize/password-protect?password=${encodeURIComponent(password)}`, { input_paths: paths }, options);
 }
 
-export function removeMetadataUpload(files, options) {
-  return postUpload("/organize/remove-metadata-upload", files, undefined, options);
+export function repairPdfUpload(files, options) {
+  return postUpload("/organize/repair-pdf-upload", files, undefined, options);
 }
 
-export function removeMetadataPath(paths, options) {
-  return postJson("/organize/remove-metadata", { input_paths: paths }, options);
+export function repairPdfPath(paths, options) {
+  return postJson("/organize/repair-pdf", { input_paths: paths }, options);
+}
+
+export function signatureReportPath(paths, options) {
+  return postJson("/organize/signature-report", { input_paths: paths }, options);
+}
+
+export function signatureReportUpload(files, options) {
+  return postUpload("/organize/signature-report-upload", files, undefined, options);
+}
+
+function watermarkFields(payload) {
+  return {
+    text: payload.text,
+    mode: payload.mode || "text",
+    preset: payload.preset || "verified",
+    pages: payload.pages || "",
+    position: payload.position || "center",
+    angle: payload.angle,
+    size: payload.size,
+    opacity: payload.opacity,
+    color: payload.color,
+  };
+}
+
+export function watermarkTextUpload(files, payload, options) {
+  return postUpload("/organize/watermark-text-upload", files, watermarkFields(payload), options);
+}
+
+export function watermarkTextPath(paths, payload, options) {
+  const params = new URLSearchParams();
+  params.set("text", payload.text);
+  params.set("mode", payload.mode || "text");
+  params.set("preset", payload.preset || "verified");
+  params.set("pages", payload.pages || "");
+  params.set("position", payload.position || "center");
+  params.set("angle", String(payload.angle));
+  params.set("size", String(payload.size));
+  params.set("opacity", String(payload.opacity));
+  params.set("color", payload.color || "#b02730");
+  return postJson(`/organize/watermark-text?${params.toString()}`, { input_paths: paths }, options);
+}
+
+export function watermarkImageUpload(files, imageFile, payload, options) {
+  const form = new FormData();
+  files.forEach((file) => {
+    form.append("files", file);
+  });
+  form.append("image", imageFile);
+  form.append("pages", payload.pages || "");
+  form.append("position", payload.position || "center");
+  form.append("angle", String(payload.angle));
+  form.append("size", String(payload.size));
+  form.append("opacity", String(payload.opacity));
+  return postForm("/organize/watermark-image-upload", form, options);
+}
+
+export function watermarkImagePath(paths, imageFile, payload, options) {
+  const form = new FormData();
+  form.append("input_path", paths[0] || "");
+  form.append("image", imageFile);
+  form.append("pages", payload.pages || "");
+  form.append("position", payload.position || "center");
+  form.append("angle", String(payload.angle));
+  form.append("size", String(payload.size));
+  form.append("opacity", String(payload.opacity));
+  return postForm("/organize/watermark-image-upload", form, options);
 }
 
 export async function downloadResult(path) {

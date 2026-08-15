@@ -55,8 +55,7 @@ def pdf_to_images(input_path: Path, output_dir: Path) -> list[Path]:
     finally:
         pdf.close()
 
-
-def render_pdf_preview(input_path: Path, max_pages: int = 48) -> list[dict[str, str | int]]:
+def render_pdf_preview(input_path: Path, max_pages: int = 48) -> list[dict[str, str | int | float]]:
     try:
         pdf = pdfium.PdfDocument(str(input_path))
     except Exception as exc:
@@ -67,6 +66,7 @@ def render_pdf_preview(input_path: Path, max_pages: int = 48) -> list[dict[str, 
         page_count = min(len(pdf), max_pages)
         for index in range(page_count):
             page = pdf[index]
+            width, height = page.get_size()
             bitmap = page.render(scale=0.55).to_pil()
             buffer = io.BytesIO()
             bitmap.save(buffer, format="PNG")
@@ -76,34 +76,11 @@ def render_pdf_preview(input_path: Path, max_pages: int = 48) -> list[dict[str, 
             pages.append(
                 {
                     "page": index + 1,
+                    "width": float(width),
+                    "height": float(height),
                     "image": f"data:image/png;base64,{encoded}",
                 }
             )
         return pages
     finally:
         pdf.close()
-
-
-def pdf_to_text(input_path: Path, output_path: Path) -> Path:
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-
-    try:
-        pdf = pdfium.PdfDocument(str(input_path))
-    except Exception as exc:
-        raise PdfEngineError(f"'{input_path.name}' could not be read: {exc}") from exc
-
-    page_text: list[str] = []
-    try:
-        for index in range(len(pdf)):
-            page = pdf[index]
-            textpage = page.get_textpage()
-            text = textpage.get_text_bounded().strip()
-            header = f"Page {index + 1}"
-            page_text.append(f"{header}\n{text}" if text else header)
-            textpage.close()
-            page.close()
-    finally:
-        pdf.close()
-
-    output_path.write_text("\n\n".join(page_text).strip() + "\n", encoding="utf-8")
-    return output_path

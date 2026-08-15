@@ -26,6 +26,47 @@ def make_pdf(path: Path, n_pages: int = 1) -> Path:
     return path
 
 
+def make_sized_pdf(path: Path, sizes: list[tuple[int, int]]) -> Path:
+    with pikepdf.new() as pdf:
+        for size in sizes:
+            pdf.add_blank_page(page_size=size)
+        pdf.save(path)
+    return path
+
+
+def page_sizes(path: Path) -> list[tuple[int, int]]:
+    with pikepdf.open(path) as pdf:
+        sizes = []
+        for page in pdf.pages:
+            media_box = [int(value) for value in page.MediaBox]
+            sizes.append((media_box[2] - media_box[0], media_box[3] - media_box[1]))
+        return sizes
+
+
+def pdf_content_bytes(path: Path) -> bytes:
+    with pikepdf.open(path) as pdf:
+        chunks: list[bytes] = []
+        for page in pdf.pages:
+            contents = page.Contents
+            streams = contents if isinstance(contents, pikepdf.Array) else [contents]
+            for stream in streams:
+                chunks.append(stream.read_bytes())
+        return b"\n".join(chunks)
+
+
+def page_content_bytes(path: Path) -> list[bytes]:
+    with pikepdf.open(path) as pdf:
+        pages: list[bytes] = []
+        for page in pdf.pages:
+            contents = page.Contents
+            if not contents:
+                pages.append(b"")
+                continue
+            streams = contents if isinstance(contents, pikepdf.Array) else [contents]
+            pages.append(b"\n".join(stream.read_bytes() for stream in streams))
+        return pages
+
+
 def make_image(path: Path, color: str) -> Path:
     image = Image.new("RGB", (120, 120), color=color)
     image.save(path)
@@ -139,35 +180,6 @@ def test_pdf_to_images_upload_succeeds_with_token(tmp_path: Path):
         assert output_path.exists()
 
 
-def test_pdf_to_text_upload_succeeds_with_token(tmp_path: Path):
-    source = make_pdf(tmp_path / "textme.pdf", 2)
-    with source.open("rb") as source_file:
-        resp = client.post(
-            "/organize/pdf-to-text-upload",
-            files=[("files", ("textme.pdf", source_file, "application/pdf"))],
-            headers={"x-privatepdf-token": settings.auth_token},
-        )
-
-    assert resp.status_code == 200
-    output_path = Path(resp.json()["output_path"])
-    assert output_path.suffix.lower() == ".txt"
-    assert output_path.exists()
-
-
-def test_pdf_to_text_path_succeeds_with_token(tmp_path: Path):
-    source = make_pdf(tmp_path / "text-path.pdf", 1)
-    resp = client.post(
-        "/organize/pdf-to-text",
-        json={"input_paths": [str(source)]},
-        headers={"x-privatepdf-token": settings.auth_token},
-    )
-
-    assert resp.status_code == 200
-    output_path = Path(resp.json()["output_path"])
-    assert output_path.suffix.lower() == ".txt"
-    assert output_path.exists()
-
-
 def test_preview_pdf_upload_succeeds_with_token(tmp_path: Path):
     source = make_pdf(tmp_path / "previewme.pdf", 2)
     with source.open("rb") as source_file:
@@ -278,6 +290,47 @@ def test_rotate_pdf_path_succeeds_with_token(tmp_path: Path):
             assert int(page.get("/Rotate", 0)) % 360 == 180
 
 
+def test_reorder_pages_upload_succeeds_with_token(tmp_path: Path):
+    source = make_sized_pdf(tmp_path / "reorderme.pdf", [(200, 200), (260, 200), (320, 200)])
+    with source.open("rb") as source_file:
+        resp = client.post(
+            "/organize/reorder-pages-upload",
+            files=[("files", ("reorderme.pdf", source_file, "application/pdf"))],
+            data={"order": "3,1,2"},
+            headers={"x-privatepdf-token": settings.auth_token},
+        )
+
+    assert resp.status_code == 200
+    output_path = Path(resp.json()["output_path"])
+    assert page_sizes(output_path) == [(320, 200), (200, 200), (260, 200)]
+
+
+def test_reorder_pages_path_succeeds_with_token(tmp_path: Path):
+    source = make_sized_pdf(tmp_path / "reorder-path.pdf", [(200, 200), (260, 200), (320, 200)])
+    resp = client.post(
+        "/organize/reorder-pages",
+        params={"order": "2,3,1"},
+        json={"input_paths": [str(source)]},
+        headers={"x-privatepdf-token": settings.auth_token},
+    )
+
+    assert resp.status_code == 200
+    output_path = Path(resp.json()["output_path"])
+    assert page_sizes(output_path) == [(260, 200), (320, 200), (200, 200)]
+
+
+def test_reorder_pages_rejects_missing_pages(tmp_path: Path):
+    source = make_pdf(tmp_path / "bad-order.pdf", 3)
+    resp = client.post(
+        "/organize/reorder-pages",
+        params={"order": "3,1"},
+        json={"input_paths": [str(source)]},
+        headers={"x-privatepdf-token": settings.auth_token},
+    )
+
+    assert resp.status_code == 400
+
+
 def test_password_protect_upload_succeeds_with_token(tmp_path: Path):
     source = make_pdf(tmp_path / "protectme.pdf", 1)
     with source.open("rb") as source_file:
@@ -296,19 +349,106 @@ def test_password_protect_upload_succeeds_with_token(tmp_path: Path):
         assert len(result.pages) == 1
 
 
-def test_remove_metadata_upload_succeeds_with_token(tmp_path: Path):
-    source = make_pdf(tmp_path / "metadatame.pdf", 1)
+def test_repair_pdf_upload_succeeds_with_token(tmp_path: Path):
+    source = make_pdf(tmp_path / "repairme.pdf", 2)
     with source.open("rb") as source_file:
         resp = client.post(
-            "/organize/remove-metadata-upload",
-            files=[("files", ("metadatame.pdf", source_file, "application/pdf"))],
+            "/organize/repair-pdf-upload",
+            files=[("files", ("repairme.pdf", source_file, "application/pdf"))],
             headers={"x-privatepdf-token": settings.auth_token},
         )
 
     assert resp.status_code == 200
     output_path = Path(resp.json()["output_path"])
     with pikepdf.open(output_path) as result:
-        assert "/Title" not in result.docinfo
+        assert len(result.pages) == 2
+
+
+def test_repair_pdf_path_succeeds_with_token(tmp_path: Path):
+    source = make_pdf(tmp_path / "repair-path.pdf", 1)
+    resp = client.post(
+        "/organize/repair-pdf",
+        json={"input_paths": [str(source)]},
+        headers={"x-privatepdf-token": settings.auth_token},
+    )
+
+    assert resp.status_code == 200
+    output_path = Path(resp.json()["output_path"])
+    with pikepdf.open(output_path) as result:
+        assert len(result.pages) == 1
+
+
+def test_watermark_text_upload_succeeds_with_token(tmp_path: Path):
+    source = make_pdf(tmp_path / "watermarkme.pdf", 2)
+    with source.open("rb") as source_file:
+        resp = client.post(
+            "/organize/watermark-text-upload",
+            files=[("files", ("watermarkme.pdf", source_file, "application/pdf"))],
+            data={"text": "CONFIDENTIAL", "pages": "2", "position": "top-right", "angle": "-35", "size": "38", "opacity": "0.4", "color": "#b02730"},
+            headers={"x-privatepdf-token": settings.auth_token},
+        )
+
+    assert resp.status_code == 200
+    output_path = Path(resp.json()["output_path"])
+    pages = page_content_bytes(output_path)
+    assert b"CONFIDENTIAL" not in pages[0]
+    assert b"CONFIDENTIAL" in pages[1]
+
+
+def test_watermark_text_path_succeeds_with_token(tmp_path: Path):
+    source = make_pdf(tmp_path / "watermark-path.pdf", 2)
+    resp = client.post(
+        "/organize/watermark-text",
+        params={"text": "NoDoc", "pages": "1", "position": "bottom-left", "angle": "15", "size": "40", "opacity": "0.3", "color": "#445566"},
+        json={"input_paths": [str(source)]},
+        headers={"x-privatepdf-token": settings.auth_token},
+    )
+
+    assert resp.status_code == 200
+    output_path = Path(resp.json()["output_path"])
+    pages = page_content_bytes(output_path)
+    assert b"NoDoc" in pages[0]
+    assert b"NoDoc" not in pages[1]
+
+
+def test_watermark_image_upload_succeeds_with_token(tmp_path: Path):
+    source = make_pdf(tmp_path / "image-watermark.pdf", 2)
+    mark = make_image(tmp_path / "signature.png", "green")
+    with source.open("rb") as source_file, mark.open("rb") as image_file:
+        resp = client.post(
+            "/organize/watermark-image-upload",
+            files=[
+                ("files", ("image-watermark.pdf", source_file, "application/pdf")),
+                ("image", ("signature.png", image_file, "image/png")),
+            ],
+            data={"pages": "1", "position": "center", "angle": "15", "size": "52", "opacity": "0.5"},
+            headers={"x-privatepdf-token": settings.auth_token},
+        )
+
+    assert resp.status_code == 200
+    output_path = Path(resp.json()["output_path"])
+    with pikepdf.open(output_path) as result:
+        assert len(result.pages) == 2
+        resources = result.pages[0].Resources.get("/XObject", {})
+        assert resources
+        assert not result.pages[1].Resources.get("/XObject", {})
+
+
+def test_signature_report_upload_detects_none(tmp_path: Path):
+    source = make_pdf(tmp_path / "signatures.pdf", 1)
+    with source.open("rb") as source_file:
+        resp = client.post(
+            "/organize/signature-report-upload",
+            files=[("files", ("signatures.pdf", source_file, "application/pdf"))],
+            headers={"x-privatepdf-token": settings.auth_token},
+        )
+
+    assert resp.status_code == 200
+    payload = resp.json()
+    assert payload["status"] == "no_signatures"
+    assert payload["signature_count"] == 0
+    assert payload["document_signed"] is False
+    assert payload["fields"] == []
 
 
 def test_download_result_requires_app_data_path(tmp_path: Path):

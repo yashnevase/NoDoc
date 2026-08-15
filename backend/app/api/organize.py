@@ -7,6 +7,8 @@ from pydantic import BaseModel, field_validator
 
 from app.auth import require_token
 from app.services.organize_service import (
+    add_image_watermark_file,
+    add_text_watermark_file,
     cleanup_job_dir,
     create_upload_job_dir,
     delete_pages_file,
@@ -15,9 +17,10 @@ from app.services.organize_service import (
     merge_files,
     password_protect_file,
     pdf_to_images_file,
-    pdf_to_text_file,
-    remove_metadata_file,
+    reorder_pages_file,
+    repair_pdf_file,
     rotate_pdf_file,
+    inspect_signatures_file,
     safe_upload_output_path,
     split_pdf_file,
 )
@@ -51,8 +54,25 @@ class MultiOutputResponse(BaseModel):
     output_paths: list[str]
 
 
+class SignatureField(BaseModel):
+    name: str
+    signed: bool
+    issues: list[str]
+    filter: str
+    subfilter: str
+
+
+class SignatureReport(BaseModel):
+    status: str
+    document_signed: bool
+    signature_count: int
+    fields: list[SignatureField]
+
+
 class PreviewPage(BaseModel):
     page: int
+    width: float
+    height: float
     image: str
 
 
@@ -95,6 +115,19 @@ def parse_page_ranges(value: str) -> list[int]:
     return page_indices
 
 
+def parse_page_order(value: str) -> list[int]:
+    raw_pages = [part.strip() for part in value.split(",") if part.strip()]
+    if not raw_pages:
+        raise HTTPException(status_code=400, detail="page order must not be empty")
+    if any(not page.isdigit() for page in raw_pages):
+        raise HTTPException(status_code=400, detail="page order must look like 3,1,2")
+
+    page_indices = [int(page) - 1 for page in raw_pages]
+    if any(index < 0 for index in page_indices):
+        raise HTTPException(status_code=400, detail="page numbers must start at 1")
+    return page_indices
+
+
 @router.post("/merge", response_model=MergeResponse)
 async def merge(req: MergeRequest) -> MergeResponse:
     try:
@@ -133,17 +166,6 @@ async def pdf_to_images(req: MergeRequest) -> MultiOutputResponse:
     except PdfEngineError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return MultiOutputResponse(output_paths=[str(path) for path in output_paths])
-
-
-@router.post("/pdf-to-text", response_model=ConvertResponse)
-async def pdf_to_text(req: MergeRequest) -> ConvertResponse:
-    if len(req.input_paths) != 1:
-        raise HTTPException(status_code=400, detail="pdf-to-text expects exactly one input PDF")
-    try:
-        output = pdf_to_text_file(Path(req.input_paths[0]))
-    except PdfEngineError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    return ConvertResponse(output_path=str(output))
 
 
 @router.post("/preview-pdf", response_model=PreviewResponse)
@@ -191,6 +213,17 @@ async def rotate_pdf(req: MergeRequest, degrees: int, pages: str = "") -> Conver
     return ConvertResponse(output_path=str(output))
 
 
+@router.post("/reorder-pages", response_model=ConvertResponse)
+async def reorder_pages(req: MergeRequest, order: str = "") -> ConvertResponse:
+    if len(req.input_paths) != 1:
+        raise HTTPException(status_code=400, detail="reorder-pages expects exactly one input PDF")
+    try:
+        output = reorder_pages_file(Path(req.input_paths[0]), parse_page_order(order))
+    except (PdfEngineError, IndexError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return ConvertResponse(output_path=str(output))
+
+
 @router.post("/password-protect", response_model=ConvertResponse)
 async def password_protect(req: MergeRequest, password: str) -> ConvertResponse:
     if len(req.input_paths) != 1:
@@ -202,12 +235,61 @@ async def password_protect(req: MergeRequest, password: str) -> ConvertResponse:
     return ConvertResponse(output_path=str(output))
 
 
-@router.post("/remove-metadata", response_model=ConvertResponse)
-async def remove_metadata(req: MergeRequest) -> ConvertResponse:
+@router.post("/signature-report", response_model=SignatureReport)
+async def signature_report(req: MergeRequest) -> SignatureReport:
     if len(req.input_paths) != 1:
-        raise HTTPException(status_code=400, detail="remove-metadata expects exactly one input PDF")
+        raise HTTPException(status_code=400, detail="signature-report expects exactly one input PDF")
     try:
-        output = remove_metadata_file(Path(req.input_paths[0]))
+        report = inspect_signatures_file(Path(req.input_paths[0]))
+    except PdfEngineError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return SignatureReport(
+        status=str(report["status"]),
+        document_signed=bool(report["document_signed"]),
+        signature_count=int(report["signature_count"]),
+        fields=[SignatureField(**field) for field in report["fields"]],
+    )
+
+
+@router.post("/repair-pdf", response_model=ConvertResponse)
+async def repair_pdf(req: MergeRequest) -> ConvertResponse:
+    if len(req.input_paths) != 1:
+        raise HTTPException(status_code=400, detail="repair-pdf expects exactly one input PDF")
+    try:
+        output = repair_pdf_file(Path(req.input_paths[0]))
+    except PdfEngineError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return ConvertResponse(output_path=str(output))
+
+
+@router.post("/watermark-text", response_model=ConvertResponse)
+async def watermark_text(
+    req: MergeRequest,
+    text: str,
+    mode: str = "text",
+    preset: str = "verified",
+    pages: str = "",
+    position: str = "center",
+    angle: float = -45.0,
+    size: float = 48.0,
+    opacity: float = 0.22,
+    color: str = "#b02730",
+) -> ConvertResponse:
+    if len(req.input_paths) != 1:
+        raise HTTPException(status_code=400, detail="watermark-text expects exactly one input PDF")
+    try:
+        output = add_text_watermark_file(
+            Path(req.input_paths[0]),
+            text,
+            mode=mode,
+            preset=preset,
+            page_indices=parse_page_ranges(pages) if pages.strip() else None,
+            position=position,
+            angle=angle,
+            size=size,
+            opacity=opacity,
+            color=color,
+        )
     except PdfEngineError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return ConvertResponse(output_path=str(output))
@@ -295,23 +377,6 @@ async def pdf_to_images_upload(files: list[UploadFile] = File(...)) -> MultiOutp
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
-@router.post("/pdf-to-text-upload", response_model=ConvertResponse)
-async def pdf_to_text_upload(files: list[UploadFile] = File(...)) -> ConvertResponse:
-    if len(files) != 1:
-        raise HTTPException(status_code=400, detail="pdf-to-text-upload expects exactly one PDF")
-
-    job_dir = create_upload_job_dir()
-    try:
-        upload = files[0]
-        target_path = job_dir / (upload.filename or "input.pdf")
-        target_path.write_bytes(await upload.read())
-        output = pdf_to_text_file(target_path)
-        return ConvertResponse(output_path=str(output))
-    except PdfEngineError as exc:
-        cleanup_job_dir(job_dir)
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-
-
 @router.post("/preview-pdf-upload", response_model=PreviewResponse)
 async def preview_pdf_upload(files: list[UploadFile] = File(...)) -> PreviewResponse:
     if len(files) != 1:
@@ -391,6 +456,26 @@ async def rotate_pdf_upload(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
+@router.post("/reorder-pages-upload", response_model=ConvertResponse)
+async def reorder_pages_upload(
+    files: list[UploadFile] = File(...),
+    order: str = Form(...),
+) -> ConvertResponse:
+    if len(files) != 1:
+        raise HTTPException(status_code=400, detail="reorder-pages-upload expects exactly one PDF")
+
+    job_dir = create_upload_job_dir()
+    try:
+        upload = files[0]
+        target_path = job_dir / (upload.filename or "input.pdf")
+        target_path.write_bytes(await upload.read())
+        output = reorder_pages_file(target_path, parse_page_order(order))
+        return ConvertResponse(output_path=str(output))
+    except (PdfEngineError, IndexError) as exc:
+        cleanup_job_dir(job_dir)
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
 @router.post("/password-protect-upload", response_model=ConvertResponse)
 async def password_protect_upload(
     files: list[UploadFile] = File(...),
@@ -411,17 +496,118 @@ async def password_protect_upload(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
-@router.post("/remove-metadata-upload", response_model=ConvertResponse)
-async def remove_metadata_upload(files: list[UploadFile] = File(...)) -> ConvertResponse:
+@router.post("/signature-report-upload", response_model=SignatureReport)
+async def signature_report_upload(files: list[UploadFile] = File(...)) -> SignatureReport:
     if len(files) != 1:
-        raise HTTPException(status_code=400, detail="remove-metadata-upload expects exactly one PDF")
+        raise HTTPException(status_code=400, detail="signature-report-upload expects exactly one input PDF")
 
     job_dir = create_upload_job_dir()
     try:
         upload = files[0]
         target_path = job_dir / (upload.filename or "input.pdf")
         target_path.write_bytes(await upload.read())
-        output = remove_metadata_file(target_path)
+        report = inspect_signatures_file(target_path)
+        return SignatureReport(
+            status=str(report["status"]),
+            document_signed=bool(report["document_signed"]),
+            signature_count=int(report["signature_count"]),
+            fields=[SignatureField(**field) for field in report["fields"]],
+        )
+    except PdfEngineError as exc:
+        cleanup_job_dir(job_dir)
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/repair-pdf-upload", response_model=ConvertResponse)
+async def repair_pdf_upload(files: list[UploadFile] = File(...)) -> ConvertResponse:
+    if len(files) != 1:
+        raise HTTPException(status_code=400, detail="repair-pdf-upload expects exactly one PDF")
+
+    job_dir = create_upload_job_dir()
+    try:
+        upload = files[0]
+        target_path = job_dir / (upload.filename or "input.pdf")
+        target_path.write_bytes(await upload.read())
+        output = repair_pdf_file(target_path)
+        return ConvertResponse(output_path=str(output))
+    except PdfEngineError as exc:
+        cleanup_job_dir(job_dir)
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/watermark-text-upload", response_model=ConvertResponse)
+async def watermark_text_upload(
+    files: list[UploadFile] = File(...),
+    text: str = Form(...),
+    mode: str = Form("text"),
+    preset: str = Form("verified"),
+    pages: str = Form(""),
+    position: str = Form("center"),
+    angle: float = Form(-45.0),
+    size: float = Form(48.0),
+    opacity: float = Form(0.22),
+    color: str = Form("#b02730"),
+) -> ConvertResponse:
+    if len(files) != 1:
+        raise HTTPException(status_code=400, detail="watermark-text-upload expects exactly one PDF")
+
+    job_dir = create_upload_job_dir()
+    try:
+        upload = files[0]
+        target_path = job_dir / (upload.filename or "input.pdf")
+        target_path.write_bytes(await upload.read())
+        output = add_text_watermark_file(
+            target_path,
+            text,
+            mode=mode,
+            preset=preset,
+            page_indices=parse_page_ranges(pages) if pages.strip() else None,
+            position=position,
+            angle=angle,
+            size=size,
+            opacity=opacity,
+            color=color,
+        )
+        return ConvertResponse(output_path=str(output))
+    except PdfEngineError as exc:
+        cleanup_job_dir(job_dir)
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/watermark-image-upload", response_model=ConvertResponse)
+async def watermark_image_upload(
+    files: list[UploadFile] | None = File(None),
+    image: UploadFile = File(...),
+    input_path: str = Form(""),
+    pages: str = Form(""),
+    position: str = Form("center"),
+    angle: float = Form(-45.0),
+    size: float = Form(48.0),
+    opacity: float = Form(0.22),
+) -> ConvertResponse:
+    if not input_path.strip() and len(files or []) != 1:
+        raise HTTPException(status_code=400, detail="watermark-image-upload expects exactly one PDF")
+
+    job_dir = create_upload_job_dir()
+    try:
+        if input_path.strip():
+            target_path = Path(input_path)
+        else:
+            upload = (files or [])[0]
+            target_path = job_dir / (upload.filename or "input.pdf")
+            target_path.write_bytes(await upload.read())
+
+        image_path = job_dir / (image.filename or "watermark-image")
+        image_path.write_bytes(await image.read())
+        output = add_image_watermark_file(
+            target_path,
+            image_path,
+            page_indices=parse_page_ranges(pages) if pages.strip() else None,
+            position=position,
+            angle=angle,
+            size=size,
+            opacity=opacity,
+        )
         return ConvertResponse(output_path=str(output))
     except PdfEngineError as exc:
         cleanup_job_dir(job_dir)

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   checkHealth,
   deletePagesPath,
@@ -15,16 +15,22 @@ import {
   passwordProtectUpload,
   pdfToImagesPath,
   pdfToImagesUpload,
-  pdfToTextPath,
-  pdfToTextUpload,
   previewPdfPath,
   previewPdfUpload,
-  removeMetadataPath,
-  removeMetadataUpload,
+  reorderPagesPath,
+  reorderPagesUpload,
+  repairPdfPath,
+  repairPdfUpload,
   rotatePdfPath,
   rotatePdfUpload,
+  signatureReportPath,
+  signatureReportUpload,
   splitPdfPath,
   splitPdfUpload,
+  watermarkImagePath,
+  watermarkImageUpload,
+  watermarkTextPath,
+  watermarkTextUpload,
 } from "./api";
 
 const imageExtensions = [".png", ".jpg", ".jpeg", ".webp", ".bmp"];
@@ -39,7 +45,6 @@ const groups = [
     tools: [
       { id: "render", icon: "image", title: "PDF to JPG", detail: "PDF pages to PNG images", needs: "1 PDF", status: "ready" },
       { id: "images", icon: "pdf", title: "JPG to PDF", detail: "Images to one PDF", needs: "Images", status: "ready" },
-      { id: "pdf_txt", icon: "text", title: "PDF to TXT", detail: "Extract embedded text", needs: "1 PDF", status: "ready" },
       { id: "pdf_docx", icon: "word", title: "PDF to DOCX", detail: "High fidelity export", needs: "Later", status: "planned" },
       { id: "docx_pdf", icon: "pdf", title: "DOCX to PDF", detail: "Needs Office engine", needs: "Later", status: "planned" },
       { id: "xlsx_pdf", icon: "sheet", title: "XLSX to PDF", detail: "Needs Office engine", needs: "Later", status: "planned" },
@@ -54,7 +59,7 @@ const groups = [
       { id: "extract", icon: "extract", title: "Extract", detail: "Picked pages to PDF", needs: "Pick pages", status: "ready" },
       { id: "delete", icon: "trash", title: "Delete", detail: "Remove picked pages", needs: "Pick pages", status: "ready" },
       { id: "rotate", icon: "rotate", title: "Rotate", detail: "Rotate all or picked pages", needs: "1 PDF", status: "ready" },
-      { id: "reorder", icon: "reorder", title: "Reorder", detail: "Drag pages into order", needs: "Quick next", status: "planned" },
+      { id: "reorder", icon: "reorder", title: "Reorder", detail: "Drag pages into order", needs: "Drag pages", status: "ready" },
       { id: "batch", icon: "batch", title: "Batch", detail: "Run tools on many files", needs: "Later", status: "planned" },
     ],
   },
@@ -62,7 +67,7 @@ const groups = [
     id: "edit",
     label: "Edit",
     tools: [
-      { id: "watermark", icon: "stamp", title: "Watermark", detail: "Add text or image mark", needs: "Quick next", status: "planned" },
+      { id: "watermark", icon: "stamp", title: "Watermark", detail: "Text, badge, or image mark", needs: "1 PDF", status: "ready" },
       { id: "text", icon: "text", title: "Text", detail: "Place text on page", needs: "Later", status: "planned" },
       { id: "draw", icon: "draw", title: "Draw", detail: "Ink and shapes", needs: "Later", status: "planned" },
       { id: "highlight", icon: "highlight", title: "Highlight", detail: "Mark page areas", needs: "Later", status: "planned" },
@@ -77,7 +82,7 @@ const groups = [
       { id: "password", icon: "lock", title: "Password", detail: "Protect with password", needs: "1 PDF", status: "ready" },
       { id: "encrypt", icon: "shield", title: "Encryption", detail: "AES PDF encryption", needs: "Included", status: "planned" },
       { id: "permissions", icon: "key", title: "Permissions", detail: "Print and copy restrictions", needs: "Later", status: "planned" },
-      { id: "digital_sign", icon: "sign", title: "Sign", detail: "Digital signatures", needs: "Complex", status: "planned" },
+      { id: "digital_sign", icon: "sign", title: "Signature Check", detail: "Inspect and validate signatures", needs: "1 PDF", status: "ready" },
     ],
   },
   {
@@ -94,8 +99,7 @@ const groups = [
     id: "tools",
     label: "Tools",
     tools: [
-      { id: "metadata", icon: "tag", title: "Metadata", detail: "Remove hidden metadata", needs: "1 PDF", status: "ready" },
-      { id: "repair", icon: "repair", title: "Repair", detail: "Best effort repair", needs: "Later", status: "planned" },
+      { id: "repair", icon: "repair", title: "Repair", detail: "Rewrite a clean PDF copy", needs: "1 PDF", status: "ready" },
       { id: "compare", icon: "compare", title: "Compare", detail: "Visual or text diff", needs: "Later", status: "planned" },
       { id: "pdfa", icon: "archive", title: "PDF/A", detail: "Archive validation", needs: "Complex", status: "planned" },
     ],
@@ -103,6 +107,7 @@ const groups = [
 ];
 
 const readyToolIds = new Set(groups.flatMap((group) => group.tools.filter((tool) => tool.status === "ready").map((tool) => tool.id)));
+const quickWatermarkAngles = [0, 90, 180, 270];
 
 function Icon({ name }) {
   const common = {
@@ -186,6 +191,9 @@ function pageActionClass(toolId, selected, rotationApplies) {
   if (toolId === "rotate" && rotationApplies) {
     return "will-rotate";
   }
+  if (toolId === "reorder") {
+    return "will-reorder";
+  }
   if (selected) {
     return "is-selected";
   }
@@ -204,7 +212,11 @@ function transferHasFiles(dataTransfer) {
   if (!dataTransfer) {
     return false;
   }
-  return Array.from(dataTransfer.types || []).includes("Files");
+  const items = Array.from(dataTransfer.items || []);
+  if (items.length) {
+    return items.some((item) => item.kind === "file");
+  }
+  return Array.from(dataTransfer.files || []).length > 0;
 }
 
 function formatTime(timestamp) {
@@ -220,6 +232,15 @@ function readStoredList(key) {
   }
 }
 
+function clamp(value, low, high) {
+  return Math.max(low, Math.min(high, value));
+}
+
+function normalizeAngle(angle) {
+  const value = angle % 360;
+  return value < 0 ? value + 360 : value;
+}
+
 export default function App() {
   const [fileItems, setFileItems] = useState([]);
   const [isDragging, setIsDragging] = useState(false);
@@ -231,20 +252,37 @@ export default function App() {
   const [rotation, setRotation] = useState(90);
   const [rotateScope, setRotateScope] = useState("selected");
   const [password, setPassword] = useState("");
+  const [watermarkText, setWatermarkText] = useState("NoDoc");
+  const [watermarkMode, setWatermarkMode] = useState("text");
+  const [watermarkPreset, setWatermarkPreset] = useState("verified");
+  const [watermarkScope, setWatermarkScope] = useState("selected");
+  const [watermarkPosition, setWatermarkPosition] = useState("center");
+  const [watermarkAngle, setWatermarkAngle] = useState(-45);
+  const [watermarkSize, setWatermarkSize] = useState(48);
+  const [watermarkOpacity, setWatermarkOpacity] = useState(0.22);
+  const [watermarkColor, setWatermarkColor] = useState("#b02730");
+  const [watermarkImageFile, setWatermarkImageFile] = useState(null);
+  const [watermarkImagePreview, setWatermarkImagePreview] = useState("");
+  const [signatureReport, setSignatureReport] = useState(null);
+  const [signatureBusy, setSignatureBusy] = useState(false);
   const [status, setStatus] = useState("Ready");
   const [result, setResult] = useState(null);
   const [busyLabel, setBusyLabel] = useState("");
   const [previewBusy, setPreviewBusy] = useState(false);
   const [pageDragMode, setPageDragMode] = useState(null);
+  const [reorderDragPage, setReorderDragPage] = useState(null);
   const [showSettings, setShowSettings] = useState(false);
-  const [openMenu, setOpenMenu] = useState("");
   const [jobHistory, setJobHistory] = useState([]);
   const [recentFiles, setRecentFiles] = useState([]);
   const [previewTick, setPreviewTick] = useState(0);
   const fileInputRef = useRef(null);
+  const watermarkImageInputRef = useRef(null);
   const dragDepthRef = useRef(0);
-  const menuRef = useRef(null);
+  const internalDragRef = useRef(false);
+  const watermarkDialRef = useRef(null);
+  const watermarkDialDragRef = useRef(false);
   const previewAbortRef = useRef(null);
+  const signatureAbortRef = useRef(null);
   const actionAbortRef = useRef(null);
 
   const activeTools = groups.find((group) => group.id === activeGroup)?.tools || [];
@@ -263,43 +301,42 @@ export default function App() {
   const exactlyOnePdfSelected = fileItems.length === 1 && pdfItems.length === 1;
   const previewSourceKey = fileItems.map((item) => item.source === "path" ? `p:${item.path}` : `u:${item.name}:${item.file.size}:${item.file.lastModified}`).join("|");
   const resultPaths = result?.paths || [];
+  const previewPage = pagePreview[0];
+  const previewPageLabel = previewPage
+    ? `${Math.round(previewPage.width)} x ${Math.round(previewPage.height)} pt`
+    : "Page preview";
+  const previewPaperStyle = previewPage
+    ? { aspectRatio: `${Math.max(1, previewPage.width)} / ${Math.max(1, previewPage.height)}` }
+    : undefined;
+  const watermarkPlacementStyle = watermarkPosition === "top-left"
+    ? { left: "24%", top: "22%" }
+    : watermarkPosition === "top-right"
+      ? { left: "76%", top: "22%" }
+      : watermarkPosition === "bottom-left"
+        ? { left: "24%", top: "78%" }
+        : watermarkPosition === "bottom-right"
+          ? { left: "76%", top: "78%" }
+          : { left: "50%", top: "50%" };
   const isBusy = Boolean(busyLabel);
   const showCancelAction = isBusy || previewBusy;
-  const pageToolActive = ["extract", "delete", "rotate"].includes(activeTool);
+  const pageToolActive = ["extract", "delete", "rotate", "watermark"].includes(activeTool);
+  const reorderActive = activeTool === "reorder";
+  const watermarkAllPages = activeTool === "watermark" && watermarkScope === "all";
+  const reorderChanged = pagePreview.length > 0 && pagePreview.some((page, index) => page.page !== index + 1);
   const rotateAppliesToAll = activeTool === "rotate" && rotateScope === "all";
+  const pageSelectionLocked = rotateAppliesToAll || watermarkAllPages;
   const selectionLabel = pageToolActive && pagePreview.length
-    ? rotateAppliesToAll
+    ? pageSelectionLocked
       ? `${pagePreview.length}/${pagePreview.length} selected`
       : `${selectedPages.length}/${pagePreview.length} selected`
     : "";
-  const actionLabel = isBusy ? busyLabel : resultPaths.length ? `Ready ${resultPaths.length === 1 ? "file" : "files"} to download` : "Ready";
-
-  const menuItems = useMemo(
-    () => ({
-      file: [
-        { label: "Open files", action: () => fileInputRef.current?.click() },
-        { label: "New workspace", action: () => clearFiles() },
-      ],
-      edit: [
-        { label: "Select all pages", action: () => selectAllPages(), disabled: !pagePreview.length || rotateAppliesToAll },
-        { label: "Unselect all pages", action: () => clearPages(), disabled: !selectedPages.length || rotateAppliesToAll },
-      ],
-      view: [
-        { label: "Reload preview", action: () => reloadPreview(), disabled: !exactlyOnePdfSelected },
-        { label: "Check engine", action: () => handleHealthCheck() },
-      ],
-      tools: [
-        { label: "Download latest file", action: () => resultPaths[0] && handleDownloadOne(resultPaths[0]), disabled: resultPaths.length !== 1 },
-        { label: "Download ZIP", action: () => handleDownloadZip(), disabled: resultPaths.length < 2 },
-        { label: "Cancel current task", action: () => cancelCurrentWork(), disabled: !showCancelAction },
-      ],
-      help: [
-        { label: "About NoDoc", action: () => setStatus("NoDoc is a local-first PDF workspace for offline conversion and organization.") },
-        { label: "How downloads work", action: () => setStatus("Results download to your browser or desktop app default download location.") },
-      ],
-    }),
-    [pagePreview.length, rotateAppliesToAll, selectedPages.length, exactlyOnePdfSelected, resultPaths, showCancelAction]
-  );
+  const actionLabel = isBusy
+    ? busyLabel
+    : resultPaths.length
+      ? `Ready ${resultPaths.length === 1 ? "file" : "files"} to download`
+      : reorderActive && reorderChanged
+        ? "Order changed"
+        : "Ready";
 
   useEffect(() => {
     function loadOpenedFiles() {
@@ -368,6 +405,70 @@ export default function App() {
   }, [exactlyOnePdfSelected, hasPaths, mixedSources, previewTick, previewSourceKey]);
 
   useEffect(() => {
+    let isCurrent = true;
+    signatureAbortRef.current?.abort();
+    setSignatureReport(null);
+    setSignatureBusy(false);
+
+    if (activeTool !== "digital_sign" || !exactlyOnePdfSelected || mixedSources) {
+      return () => {};
+    }
+
+    const controller = new AbortController();
+    signatureAbortRef.current = controller;
+    setSignatureBusy(true);
+
+    async function loadSignatureReport() {
+      try {
+        const response = hasPaths
+          ? await signatureReportPath(pathInputs, { signal: controller.signal })
+          : await signatureReportUpload(uploadedFiles, { signal: controller.signal });
+        if (isCurrent) {
+          setSignatureReport(response);
+          setStatus(
+            response.signature_count
+              ? response.document_signed
+                ? `Found ${response.signature_count} signature${response.signature_count === 1 ? "" : "s"}`
+                : `Found ${response.signature_count} signature field${response.signature_count === 1 ? "" : "s"}`
+              : "No signature fields found"
+          );
+        }
+      } catch (err) {
+        if (err.name === "AbortError") {
+          return;
+        }
+        if (isCurrent) {
+          setStatus(`Signature check error: ${err.message}`);
+        }
+      } finally {
+        if (isCurrent) {
+          setSignatureBusy(false);
+        }
+        if (signatureAbortRef.current === controller) {
+          signatureAbortRef.current = null;
+        }
+      }
+    }
+
+    loadSignatureReport();
+    return () => {
+      isCurrent = false;
+      signatureAbortRef.current?.abort();
+    };
+  }, [activeTool, exactlyOnePdfSelected, hasPaths, mixedSources, previewSourceKey]);
+
+  useEffect(() => {
+    if (!watermarkImageFile) {
+      setWatermarkImagePreview("");
+      return undefined;
+    }
+
+    const previewUrl = URL.createObjectURL(watermarkImageFile);
+    setWatermarkImagePreview(previewUrl);
+    return () => URL.revokeObjectURL(previewUrl);
+  }, [watermarkImageFile]);
+
+  useEffect(() => {
     if (pageDragMode === null) {
       return;
     }
@@ -385,7 +486,33 @@ export default function App() {
   }, [pageDragMode]);
 
   useEffect(() => {
+    function handlePointerMove(event) {
+      if (!watermarkDialDragRef.current) {
+        return;
+      }
+      setWatermarkAngleFromPoint(event.clientX, event.clientY);
+    }
+
+    function stopWatermarkDial() {
+      watermarkDialDragRef.current = false;
+    }
+
+    window.addEventListener("pointermove", handlePointerMove);
+    window.addEventListener("pointerup", stopWatermarkDial);
+    window.addEventListener("pointercancel", stopWatermarkDial);
+    return () => {
+      window.removeEventListener("pointermove", handlePointerMove);
+      window.removeEventListener("pointerup", stopWatermarkDial);
+      window.removeEventListener("pointercancel", stopWatermarkDial);
+    };
+  }, []);
+
+  useEffect(() => {
     function handleWindowDragEnter(event) {
+      if (internalDragRef.current) {
+        event.preventDefault();
+        return;
+      }
       if (!transferHasFiles(event.dataTransfer)) {
         return;
       }
@@ -395,6 +522,10 @@ export default function App() {
     }
 
     function handleWindowDragOver(event) {
+      if (internalDragRef.current) {
+        event.preventDefault();
+        return;
+      }
       if (!transferHasFiles(event.dataTransfer)) {
         return;
       }
@@ -403,6 +534,10 @@ export default function App() {
     }
 
     function handleWindowDragLeave(event) {
+      if (internalDragRef.current) {
+        event.preventDefault();
+        return;
+      }
       if (!transferHasFiles(event.dataTransfer)) {
         return;
       }
@@ -414,6 +549,13 @@ export default function App() {
     }
 
     function handleWindowDrop(event) {
+      if (internalDragRef.current) {
+        event.preventDefault();
+        internalDragRef.current = false;
+        dragDepthRef.current = 0;
+        setDropOverlayActive(false);
+        return;
+      }
       if (!transferHasFiles(event.dataTransfer)) {
         return;
       }
@@ -461,6 +603,30 @@ export default function App() {
       if (["selected", "all"].includes(preferences.rotateScope)) {
         setRotateScope(preferences.rotateScope);
       }
+      if (["selected", "all"].includes(preferences.watermarkScope)) {
+        setWatermarkScope(preferences.watermarkScope);
+      }
+      if (["text", "badge", "image"].includes(preferences.watermarkMode)) {
+        setWatermarkMode(preferences.watermarkMode);
+      }
+      if (["verified", "question"].includes(preferences.watermarkPreset)) {
+        setWatermarkPreset(preferences.watermarkPreset);
+      }
+      if (["center", "top-left", "top-right", "bottom-left", "bottom-right"].includes(preferences.watermarkPosition)) {
+        setWatermarkPosition(preferences.watermarkPosition);
+      }
+      if (typeof preferences.watermarkAngle === "number") {
+        setWatermarkAngle(preferences.watermarkAngle);
+      }
+      if (typeof preferences.watermarkSize === "number") {
+        setWatermarkSize(preferences.watermarkSize);
+      }
+      if (typeof preferences.watermarkOpacity === "number") {
+        setWatermarkOpacity(preferences.watermarkOpacity);
+      }
+      if (typeof preferences.watermarkColor === "string") {
+        setWatermarkColor(preferences.watermarkColor);
+      }
     } catch {
       window.localStorage.removeItem(settingsKey);
     }
@@ -472,9 +638,22 @@ export default function App() {
   useEffect(() => {
     window.localStorage.setItem(
       settingsKey,
-      JSON.stringify({ activeGroup, activeTool, rotation, rotateScope })
+      JSON.stringify({
+        activeGroup,
+        activeTool,
+        rotation,
+        rotateScope,
+        watermarkScope,
+        watermarkMode,
+        watermarkPreset,
+        watermarkPosition,
+        watermarkAngle,
+        watermarkSize,
+        watermarkOpacity,
+        watermarkColor,
+      })
     );
-  }, [activeGroup, activeTool, rotation, rotateScope]);
+  }, [activeGroup, activeTool, rotation, rotateScope, watermarkScope, watermarkMode, watermarkPreset, watermarkPosition, watermarkAngle, watermarkSize, watermarkOpacity, watermarkColor]);
 
   useEffect(() => {
     window.localStorage.setItem(historyKey, JSON.stringify(jobHistory));
@@ -507,17 +686,6 @@ export default function App() {
     };
   }, []);
 
-  useEffect(() => {
-    function handleOutsideMenuClick(event) {
-      if (!menuRef.current?.contains(event.target)) {
-        setOpenMenu("");
-      }
-    }
-
-    window.addEventListener("pointerdown", handleOutsideMenuClick);
-    return () => window.removeEventListener("pointerdown", handleOutsideMenuClick);
-  }, []);
-
   function rememberRecentFiles(names) {
     if (!names.length) {
       return;
@@ -534,6 +702,7 @@ export default function App() {
       id: `${Date.now()}-${toolId}`,
       createdAt: Date.now(),
       tool: toolTitle,
+      paths,
       outputs: paths.map((path) => pathName(path)),
       count: paths.length,
     };
@@ -556,13 +725,17 @@ export default function App() {
 
   function clearFiles() {
     previewAbortRef.current?.abort();
+    signatureAbortRef.current?.abort();
     actionAbortRef.current?.abort();
     setFileItems([]);
     setResult(null);
     setSelectedPages([]);
     setPagePreview([]);
+    setSignatureReport(null);
+    setSignatureBusy(false);
     setBusyLabel("");
     setPreviewBusy(false);
+    setReorderDragPage(null);
     setStatus("Workspace cleared");
   }
 
@@ -585,6 +758,15 @@ export default function App() {
     setActiveTool(tool.id);
     if (tool.id !== "rotate") {
       setRotateScope("selected");
+    }
+    if (tool.id !== "watermark") {
+      setWatermarkScope("selected");
+    }
+    if (tool.id !== "digital_sign") {
+      setSignatureReport(null);
+    }
+    if (!["extract", "delete", "rotate", "watermark"].includes(tool.id)) {
+      setSelectedPages([]);
     }
     if (tool.status !== "ready") {
       setStatus(`${tool.title} is planned for a later build.`);
@@ -649,6 +831,66 @@ export default function App() {
     setPageDragMode(null);
   }
 
+  function movePreviewPage(fromPage, toPage) {
+    if (fromPage === toPage) {
+      return;
+    }
+    setPagePreview((current) => {
+      const fromIndex = current.findIndex((page) => page.page === fromPage);
+      const toIndex = current.findIndex((page) => page.page === toPage);
+      if (fromIndex < 0 || toIndex < 0) {
+        return current;
+      }
+      const next = [...current];
+      const [moved] = next.splice(fromIndex, 1);
+      next.splice(toIndex, 0, moved);
+      return next;
+    });
+    setResult(null);
+    setStatus("Page order changed");
+  }
+
+  function resetPageOrder() {
+    setPagePreview((current) => [...current].sort((a, b) => a.page - b.page));
+    setReorderDragPage(null);
+    setResult(null);
+    setStatus("Page order reset");
+  }
+
+  function setWatermarkAngleFromPoint(clientX, clientY) {
+    const dial = watermarkDialRef.current;
+    if (!dial) {
+      return;
+    }
+    const rect = dial.getBoundingClientRect();
+    const centerX = rect.left + rect.width / 2;
+    const centerY = rect.top + rect.height / 2;
+    const rawAngle = Math.atan2(clientY - centerY, clientX - centerX) * (180 / Math.PI);
+    setWatermarkAngle(normalizeAngle(rawAngle + 90));
+  }
+
+  function beginWatermarkDial(event) {
+    if (isBusy) {
+      return;
+    }
+    event.preventDefault();
+    watermarkDialDragRef.current = true;
+    setWatermarkAngleFromPoint(event.clientX, event.clientY);
+  }
+
+  function updateWatermarkImage(files) {
+    const [file] = Array.from(files || []);
+    if (!file) {
+      return;
+    }
+    if (!hasExtension(file.name, imageExtensions)) {
+      setStatus("Choose a PNG, JPG, WEBP, or BMP watermark image.");
+      return;
+    }
+    setWatermarkImageFile(file);
+    setWatermarkMode("image");
+  }
+
   function assertReady() {
     if (!readyToolIds.has(activeTool)) {
       return `${activeToolInfo?.title || "This tool"} is planned for later.`;
@@ -662,7 +904,7 @@ export default function App() {
     if (activeTool === "images" && !allSelectedAreImages) {
       return "Select one or more image files.";
     }
-    if (["split", "render", "pdf_txt", "extract", "delete", "rotate", "password", "metadata"].includes(activeTool) && !exactlyOnePdfSelected) {
+    if (["split", "render", "extract", "delete", "rotate", "reorder", "password", "repair", "watermark", "digital_sign"].includes(activeTool) && !exactlyOnePdfSelected) {
       return "Select exactly one PDF file.";
     }
     if (["extract", "delete"].includes(activeTool) && selectedPages.length === 0) {
@@ -671,8 +913,20 @@ export default function App() {
     if (activeTool === "rotate" && rotateScope === "selected" && selectedPages.length === 0) {
       return "Pick pages to rotate or switch to All pages.";
     }
+    if (activeTool === "reorder" && !reorderChanged) {
+      return "Drag pages into a new order first.";
+    }
     if (activeTool === "password" && !password.trim()) {
       return "Enter a password for the protected PDF.";
+    }
+    if (activeTool === "watermark" && watermarkScope === "selected" && selectedPages.length === 0) {
+      return "Pick pages to watermark or switch to All pages.";
+    }
+    if (activeTool === "watermark" && watermarkMode === "text" && !watermarkText.trim()) {
+      return "Enter watermark text.";
+    }
+    if (activeTool === "watermark" && watermarkMode === "image" && !watermarkImageFile) {
+      return "Choose a watermark image.";
     }
     return "";
   }
@@ -683,6 +937,7 @@ export default function App() {
     setBusyLabel("");
     setPreviewBusy(false);
     setPageDragMode(null);
+    setReorderDragPage(null);
     setStatus("Current task cancelled");
   }
 
@@ -723,7 +978,12 @@ export default function App() {
       setResult(null);
       try {
         let response;
-        const pageRange = activeTool === "rotate" && rotateScope === "all" ? "" : pagesToRange(selectedPages);
+        const pageRange =
+          activeTool === "rotate" && rotateScope === "all"
+            ? ""
+            : activeTool === "watermark" && watermarkScope === "all"
+              ? ""
+              : pagesToRange(selectedPages);
 
         if (activeTool === "merge") {
           response = hasPaths ? await mergePathFiles(pathInputs, { signal }) : await mergeUploadedFiles(uploadedFiles, { signal });
@@ -733,18 +993,50 @@ export default function App() {
           response = hasPaths ? await splitPdfPath(pathInputs, { signal }) : await splitPdfUpload(uploadedFiles, { signal });
         } else if (activeTool === "render") {
           response = hasPaths ? await pdfToImagesPath(pathInputs, { signal }) : await pdfToImagesUpload(uploadedFiles, { signal });
-        } else if (activeTool === "pdf_txt") {
-          response = hasPaths ? await pdfToTextPath(pathInputs, { signal }) : await pdfToTextUpload(uploadedFiles, { signal });
         } else if (activeTool === "extract") {
           response = hasPaths ? await extractPagesPath(pathInputs, pageRange, { signal }) : await extractPagesUpload(uploadedFiles, pageRange, { signal });
         } else if (activeTool === "delete") {
           response = hasPaths ? await deletePagesPath(pathInputs, pageRange, { signal }) : await deletePagesUpload(uploadedFiles, pageRange, { signal });
         } else if (activeTool === "rotate") {
           response = hasPaths ? await rotatePdfPath(pathInputs, rotation, pageRange, { signal }) : await rotatePdfUpload(uploadedFiles, rotation, pageRange, { signal });
+        } else if (activeTool === "reorder") {
+          const pageOrder = pagePreview.map((page) => page.page).join(",");
+          response = hasPaths ? await reorderPagesPath(pathInputs, pageOrder, { signal }) : await reorderPagesUpload(uploadedFiles, pageOrder, { signal });
         } else if (activeTool === "password") {
           response = hasPaths ? await passwordProtectPath(pathInputs, password, { signal }) : await passwordProtectUpload(uploadedFiles, password, { signal });
-        } else if (activeTool === "metadata") {
-          response = hasPaths ? await removeMetadataPath(pathInputs, { signal }) : await removeMetadataUpload(uploadedFiles, { signal });
+        } else if (activeTool === "repair") {
+          response = hasPaths ? await repairPdfPath(pathInputs, { signal }) : await repairPdfUpload(uploadedFiles, { signal });
+        } else if (activeTool === "watermark") {
+          const watermarkPayload = {
+            text: watermarkText,
+            mode: watermarkMode,
+            preset: watermarkPreset,
+            pages: pageRange,
+            position: watermarkPosition,
+            angle: watermarkAngle,
+            size: watermarkSize,
+            opacity: watermarkOpacity,
+            color: watermarkColor,
+          };
+          response = watermarkMode === "image"
+            ? hasPaths
+              ? await watermarkImagePath(pathInputs, watermarkImageFile, watermarkPayload, { signal })
+              : await watermarkImageUpload(uploadedFiles, watermarkImageFile, watermarkPayload, { signal })
+            : hasPaths
+              ? await watermarkTextPath(pathInputs, watermarkPayload, { signal })
+              : await watermarkTextUpload(uploadedFiles, watermarkPayload, { signal });
+        } else if (activeTool === "digital_sign") {
+          response = hasPaths ? await signatureReportPath(pathInputs, { signal }) : await signatureReportUpload(uploadedFiles, { signal });
+          setSignatureReport(response);
+          setResult({ tool: activeTool, paths: [] });
+          setStatus(
+            response.signature_count
+              ? response.document_signed
+                ? `Found ${response.signature_count} signature${response.signature_count === 1 ? "" : "s"}`
+                : `Found ${response.signature_count} signature field${response.signature_count === 1 ? "" : "s"}`
+              : "No signature fields found"
+          );
+          return;
         }
 
         const paths = outputPathsFromResult(response);
@@ -772,47 +1064,15 @@ export default function App() {
     });
   }
 
-  async function handleDownloadZip() {
+  async function handleDownloadZip(paths = resultPaths) {
     await withBusy("Preparing ZIP...", async () => {
       try {
-        await downloadZip(resultPaths);
+        await downloadZip(paths);
         setStatus("ZIP download started");
       } catch (err) {
         setStatus(`ZIP error: ${err.message}`);
       }
     });
-  }
-
-  function renderMenu(id, label) {
-    return (
-      <div className="app-menu-slot" key={id}>
-        <button
-          className={`app-menu-button ${openMenu === id ? "is-open" : ""}`}
-          type="button"
-          onClick={() => setOpenMenu((current) => (current === id ? "" : id))}
-        >
-          {label}
-        </button>
-        {openMenu === id && (
-          <div className="app-menu-popover">
-            {menuItems[id].map((item) => (
-              <button
-                className="app-menu-item"
-                key={item.label}
-                type="button"
-                onClick={() => {
-                  setOpenMenu("");
-                  item.action();
-                }}
-                disabled={item.disabled}
-              >
-                {item.label}
-              </button>
-            ))}
-          </div>
-        )}
-      </div>
-    );
   }
 
   return (
@@ -873,9 +1133,24 @@ export default function App() {
                 <ul className="settings-list">
                   {jobHistory.map((entry) => (
                     <li key={entry.id}>
-                      <strong>{entry.tool}</strong>
-                      <span>{entry.outputs.join(", ")}</span>
-                      <em>{formatTime(entry.createdAt)}</em>
+                      <div className="settings-list-main">
+                        <strong>{entry.tool}</strong>
+                        <span>{entry.outputs.join(", ")}</span>
+                        <em>{formatTime(entry.createdAt)}</em>
+                      </div>
+                      <div className="settings-list-actions">
+                        {entry.paths?.length === 1 ? (
+                          <button type="button" onClick={() => handleDownloadOne(entry.paths[0])} disabled={isBusy}>
+                            <Icon name="download" />
+                            <span>Download</span>
+                          </button>
+                        ) : (
+                          <button type="button" onClick={() => handleDownloadZip(entry.paths || [])} disabled={isBusy || !entry.paths?.length}>
+                            <Icon name="download" />
+                            <span>ZIP</span>
+                          </button>
+                        )}
+                      </div>
                     </li>
                   ))}
                 </ul>
@@ -933,17 +1208,6 @@ export default function App() {
             <Icon name="settings" />
             <span>Settings</span>
           </button>
-        </div>
-      </section>
-
-      <section className="app-menu-bar" ref={menuRef}>
-        <div className="app-menu-groups">
-          {renderMenu("file", "File")}
-          <button className="app-menu-button" type="button" onClick={clearFiles}>New</button>
-          {renderMenu("edit", "Edit")}
-          {renderMenu("view", "View")}
-          {renderMenu("tools", "Tools")}
-          {renderMenu("help", "Help")}
         </div>
       </section>
 
@@ -1056,7 +1320,7 @@ export default function App() {
 
             <button className="primary-action" type="button" onClick={runActiveTool} disabled={isBusy}>
               <Icon name="check" />
-              <span>{readyToolIds.has(activeTool) ? "Apply" : "Planned"}</span>
+              <span>{activeTool === "digital_sign" ? "Check" : readyToolIds.has(activeTool) ? "Apply" : "Planned"}</span>
             </button>
 
             {showCancelAction && (
@@ -1152,21 +1416,28 @@ export default function App() {
             <div className="preview-panel">
               <div className="panel-heading">
                 <h2>Pages</h2>
-                <div className="preview-meta">
-                  <span>{previewBusy ? "..." : `${pagePreview.length} total`}</span>
-                  {pageToolActive && <span>{selectionLabel}</span>}
-                </div>
+              <div className="preview-meta">
+                <span>{previewBusy ? "..." : `${pagePreview.length} total`}</span>
+                {pageToolActive && <span>{selectionLabel}</span>}
+                {reorderActive && reorderChanged && <span>Order changed</span>}
               </div>
+            </div>
 
               {pageToolActive && (
                 <div className="preview-toolbar">
                   <div>
                     <strong>{pagePreview.length} total</strong>
-                    <span>{activeTool === "rotate" && rotateAppliesToAll ? "All pages targeted" : `${selectedPages.length} selected`}</span>
+                    <span>
+                      {activeTool === "rotate" && rotateAppliesToAll
+                        ? "All pages targeted"
+                        : activeTool === "watermark" && watermarkAllPages
+                          ? "All pages targeted"
+                          : `${selectedPages.length} selected`}
+                    </span>
                   </div>
 
                   <div className="preview-toolbar-actions">
-                    {!rotateAppliesToAll && (
+                    {!pageSelectionLocked && (
                       <>
                         <button type="button" onClick={selectAllPages} disabled={!pagePreview.length || isBusy}>
                           Select all
@@ -1176,6 +1447,403 @@ export default function App() {
                         </button>
                       </>
                     )}
+                  </div>
+                </div>
+              )}
+
+              {reorderActive && (
+                <div className="preview-toolbar">
+                  <div>
+                    <strong>{pagePreview.length} total</strong>
+                    <span>{reorderChanged ? "Reordered preview" : "Original order"}</span>
+                  </div>
+
+                  <div className="preview-toolbar-actions">
+                    <button type="button" onClick={resetPageOrder} disabled={!reorderChanged || isBusy}>
+                      Reset order
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {activeTool === "digital_sign" && (
+                <div className="signature-report">
+                  <div className="signature-report-head">
+                    <div>
+                      <strong>Signature check</strong>
+                      <span>
+                        {signatureBusy
+                          ? "Inspecting document"
+                          : signatureReport
+                            ? `${signatureReport.signature_count} field${signatureReport.signature_count === 1 ? "" : "s"} found`
+                            : "No report yet"}
+                      </span>
+                    </div>
+                    <div className={`signature-pill is-${signatureReport?.status || "idle"}`}>
+                      {signatureBusy
+                        ? "Checking"
+                        : signatureReport
+                          ? signatureReport.status === "signed"
+                            ? "Signed"
+                            : signatureReport.status === "unsigned"
+                              ? "Needs review"
+                              : "None found"
+                          : "Ready"}
+                    </div>
+                  </div>
+
+                  {signatureBusy ? (
+                    <div className="signature-empty">
+                      <span />
+                      <p>Reading signature fields and validation markers</p>
+                    </div>
+                  ) : signatureReport ? (
+                    <div className="signature-report-body">
+                      <div className="signature-summary">
+                        <strong>{signatureReport.document_signed ? "Signature present" : "No valid signature yet"}</strong>
+                        <p>
+                          {signatureReport.document_signed
+                            ? "The file contains signature fields with ByteRange and Contents data."
+                            : signatureReport.signature_count
+                              ? "Signature fields exist, but they are incomplete or need review."
+                              : "No signature fields were detected in this document."}
+                        </p>
+                      </div>
+                      <div className="signature-field-list">
+                        {signatureReport.fields.length ? (
+                          signatureReport.fields.map((field) => (
+                            <article key={field.name} className="signature-field-card">
+                              <div className="signature-field-head">
+                                <strong>{field.name}</strong>
+                                <span className={field.signed ? "is-signed" : "is-warning"}>
+                                  {field.signed ? "Structure OK" : "Attention"}
+                                </span>
+                              </div>
+                              <p>{field.filter || "No filter"}{field.subfilter ? ` | ${field.subfilter}` : ""}</p>
+                              {field.issues.length > 0 && <em>{field.issues.join(", ")}</em>}
+                            </article>
+                          ))
+                        ) : (
+                          <div className="signature-empty compact">
+                            <p>No signature fields detected.</p>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="signature-empty">
+                      <p>Open a PDF to inspect signatures.</p>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {activeTool === "watermark" && (
+                <div className="watermark-editor">
+                  <div className="watermark-editor-head">
+                    <div>
+                      <strong>Watermark editor</strong>
+                      <span>{watermarkAllPages ? "All pages" : `${selectedPages.length} selected`}</span>
+                    </div>
+                    <button type="button" onClick={() => setWatermarkText("NoDoc")} disabled={isBusy}>
+                      Reset text
+                    </button>
+                  </div>
+
+                  <div className="watermark-editor-body">
+                    <div className="watermark-preview-shell">
+                      <div className="watermark-preview-page" style={previewPaperStyle}>
+                        <div className="watermark-preview-size">{previewPageLabel}</div>
+                        {previewPage?.image ? (
+                          <img
+                            className="watermark-preview-image"
+                            src={previewPage.image}
+                            alt="Selected PDF page preview"
+                            draggable="false"
+                          />
+                        ) : (
+                          <div className="watermark-preview-empty">Preview</div>
+                        )}
+                        {watermarkMode === "badge" ? (
+                          <div
+                            className={`watermark-preview-badge is-${watermarkPreset}`}
+                            style={{
+                              ...watermarkPlacementStyle,
+                              opacity: clamp(watermarkOpacity, 0.05, 1),
+                              transform: `translate(-50%, -50%) rotate(${watermarkAngle}deg)`,
+                              background: watermarkPreset === "question" ? "#f2cd53" : watermarkColor,
+                              color: watermarkPreset === "question" ? "#1f1f1f" : "#ffffff",
+                              width: `${clamp(watermarkSize * 2.4, 84, 220)}px`,
+                              height: `${clamp(watermarkSize * 2.4, 84, 220)}px`,
+                            }}
+                          >
+                            <strong>{watermarkPreset === "question" ? "?" : "V"}</strong>
+                            <span>{watermarkText.trim() || "NoDoc"}</span>
+                          </div>
+                        ) : watermarkMode === "image" ? (
+                          watermarkImagePreview ? (
+                            <img
+                              className="watermark-preview-mark-image"
+                              src={watermarkImagePreview}
+                              alt="Watermark image preview"
+                              draggable="false"
+                              style={{
+                                ...watermarkPlacementStyle,
+                                opacity: clamp(watermarkOpacity, 0.05, 1),
+                                width: `${clamp(watermarkSize * 3.2, 48, 360)}px`,
+                                transform: `translate(-50%, -50%) rotate(${watermarkAngle}deg)`,
+                              }}
+                            />
+                          ) : (
+                            <button
+                              type="button"
+                              className="watermark-image-empty"
+                              onClick={() => watermarkImageInputRef.current?.click()}
+                              disabled={isBusy}
+                            >
+                              Choose image mark
+                            </button>
+                          )
+                        ) : (
+                          <div
+                            className="watermark-preview-text"
+                            style={{
+                              ...watermarkPlacementStyle,
+                              opacity: clamp(watermarkOpacity, 0.05, 1),
+                              color: watermarkColor,
+                              fontSize: `${clamp(watermarkSize, 18, 140)}px`,
+                              transform: `translate(-50%, -50%) rotate(${watermarkAngle}deg)`,
+                            }}
+                          >
+                            {watermarkText.trim() || "NoDoc"}
+                          </div>
+                        )}
+                      </div>
+                      <p className="watermark-preview-note">
+                        Live preview uses the selected PDF page so placement, angle, size, and opacity are visible before Apply.
+                      </p>
+                    </div>
+
+                    <div className="watermark-editor-scroll">
+                      <div className="watermark-grid">
+                        <div className="field">
+                          <span>Mode</span>
+                          <div className="segmented-control scope-control watermark-mode-control">
+                            {[
+                              { id: "text", label: "Text watermark" },
+                              { id: "badge", label: "Badge / mark" },
+                              { id: "image", label: "Image / signature" },
+                            ].map((mode) => (
+                              <button
+                                className={watermarkMode === mode.id ? "is-active" : ""}
+                                key={mode.id}
+                                type="button"
+                                onClick={() => setWatermarkMode(mode.id)}
+                                disabled={isBusy}
+                              >
+                                <span>{mode.label}</span>
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+
+                        {watermarkMode !== "image" ? (
+                          <label className="field">
+                            <span>{watermarkMode === "badge" ? "Label" : "Text"}</span>
+                            <input
+                              type="text"
+                              value={watermarkText}
+                              onChange={(event) => setWatermarkText(event.target.value)}
+                              placeholder={watermarkMode === "badge" ? "Stamp label" : "Watermark text"}
+                              maxLength={120}
+                            />
+                          </label>
+                        ) : (
+                          <div className="field">
+                            <span>Image</span>
+                            <div className="watermark-image-picker">
+                              <button type="button" onClick={() => watermarkImageInputRef.current?.click()} disabled={isBusy}>
+                                Choose image
+                              </button>
+                              <span title={watermarkImageFile?.name || ""}>{watermarkImageFile?.name || "No image selected"}</span>
+                              {watermarkImageFile && (
+                                <button type="button" onClick={() => setWatermarkImageFile(null)} disabled={isBusy}>
+                                  Remove
+                                </button>
+                              )}
+                              <input
+                                ref={watermarkImageInputRef}
+                                type="file"
+                                accept=".png,.jpg,.jpeg,.webp,.bmp"
+                                onChange={(event) => updateWatermarkImage(event.target.files)}
+                              />
+                            </div>
+                          </div>
+                        )}
+
+                        {watermarkMode === "badge" && (
+                        <div className="field">
+                          <span>Badge</span>
+                          <div className="badge-presets">
+                            {[
+                              { id: "verified", label: "Verified", icon: "V" },
+                              { id: "question", label: "Question", icon: "?" },
+                            ].map((preset) => (
+                              <button
+                                key={preset.id}
+                                type="button"
+                                className={watermarkPreset === preset.id ? "is-active" : ""}
+                                onClick={() => setWatermarkPreset(preset.id)}
+                                disabled={isBusy}
+                              >
+                                <strong>{preset.icon}</strong>
+                                <span>{preset.label}</span>
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                        )}
+
+                        <div className="field">
+                          <span>Pages</span>
+                          <div className="segmented-control scope-control">
+                            {[
+                              { id: "selected", label: "Selected" },
+                              { id: "all", label: "All pages" },
+                            ].map((scope) => (
+                              <button
+                                className={watermarkScope === scope.id ? "is-active" : ""}
+                                key={scope.id}
+                                type="button"
+                                onClick={() => setWatermarkScope(scope.id)}
+                                disabled={isBusy}
+                              >
+                                <span>{scope.label}</span>
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+
+                        <label className="field">
+                          <span>Position</span>
+                          <select value={watermarkPosition} onChange={(event) => setWatermarkPosition(event.target.value)} disabled={isBusy}>
+                            <option value="center">Center</option>
+                            <option value="top-left">Top left</option>
+                            <option value="top-right">Top right</option>
+                            <option value="bottom-left">Bottom left</option>
+                            <option value="bottom-right">Bottom right</option>
+                          </select>
+                        </label>
+
+                        <div className="field">
+                          <span>Angle</span>
+                          <div className="watermark-angle">
+                            <button
+                              type="button"
+                              className="watermark-dial"
+                              ref={watermarkDialRef}
+                              onPointerDown={beginWatermarkDial}
+                              disabled={isBusy}
+                              aria-label="Rotate watermark"
+                            >
+                              <span className="watermark-dial-ring" />
+                              <span
+                                className="watermark-dial-arm"
+                                style={{ transform: `rotate(${normalizeAngle(watermarkAngle)}deg)` }}
+                              />
+                              <span className="watermark-dial-knob" />
+                            </button>
+                            <div className="watermark-angle-copy">
+                              <strong>{Math.round(normalizeAngle(watermarkAngle))}°</strong>
+                              <span>Drag or tap a preset</span>
+                            </div>
+                          </div>
+                          <div className="watermark-quick-angles">
+                            {quickWatermarkAngles.map((angle) => (
+                              <button
+                                key={angle}
+                                type="button"
+                                className={Math.round(normalizeAngle(watermarkAngle)) === angle ? "is-active" : ""}
+                                onClick={() => setWatermarkAngle(angle)}
+                                disabled={isBusy}
+                              >
+                                {angle}°
+                              </button>
+                            ))}
+                            <input
+                              className="watermark-angle-input"
+                              type="number"
+                              value={Math.round(normalizeAngle(watermarkAngle))}
+                              min={-180}
+                              max={180}
+                              step={1}
+                              onChange={(event) => setWatermarkAngle(Number(event.target.value || 0))}
+                              disabled={isBusy}
+                            />
+                          </div>
+                        </div>
+
+                        <label className="field">
+                          <span>Size</span>
+                          <div className="field-inline">
+                            <input
+                              type="range"
+                              value={watermarkSize}
+                              onChange={(event) => setWatermarkSize(Number(event.target.value))}
+                              min={12}
+                              max={140}
+                              step={1}
+                              disabled={isBusy}
+                            />
+                            <input
+                              className="field-inline-input"
+                              type="number"
+                              value={watermarkSize}
+                              onChange={(event) => setWatermarkSize(Number(event.target.value || 0))}
+                              min={12}
+                              max={140}
+                              step={1}
+                              disabled={isBusy}
+                            />
+                          </div>
+                        </label>
+
+                        <label className="field">
+                          <span>Opacity</span>
+                          <div className="field-inline">
+                            <input
+                              type="range"
+                              value={watermarkOpacity}
+                              onChange={(event) => setWatermarkOpacity(Number(event.target.value))}
+                              min={0.05}
+                              max={1}
+                              step={0.01}
+                              disabled={isBusy}
+                            />
+                            <input
+                              className="field-inline-input"
+                              type="number"
+                              value={Math.round(watermarkOpacity * 100)}
+                              onChange={(event) => setWatermarkOpacity(clamp(Number(event.target.value || 0) / 100, 0.05, 1))}
+                              min={5}
+                              max={100}
+                              step={1}
+                              disabled={isBusy}
+                            />
+                          </div>
+                        </label>
+
+                        <label className="field">
+                          <span>{watermarkMode === "image" ? "Tint color (text/badge only)" : "Color"}</span>
+                          <input
+                            type="color"
+                            value={watermarkColor}
+                            onChange={(event) => setWatermarkColor(event.target.value)}
+                            disabled={isBusy || watermarkMode === "image"}
+                          />
+                        </label>
+                      </div>
+                    </div>
                   </div>
                 </div>
               )}
@@ -1192,7 +1860,7 @@ export default function App() {
                     const rotationApplies = rotateAppliesToAll || selected;
                     return (
                       <button
-                        className={`page-thumb ${pageActionClass(activeTool, selected, rotationApplies)}`}
+                        className={`page-thumb ${pageActionClass(activeTool, selected, rotationApplies)} ${reorderDragPage === page.page ? "is-dragging-page" : ""}`}
                         key={page.page}
                         style={
                           activeTool === "rotate" && rotationApplies
@@ -1203,12 +1871,55 @@ export default function App() {
                             : undefined
                         }
                         type="button"
-                        title={pageToolActive ? "Drag across pages to multi-select" : `Page ${page.page}`}
+                        title={reorderActive ? "Drag to reorder pages" : pageToolActive ? "Drag across pages to multi-select" : `Page ${page.page}`}
+                        draggable={reorderActive && !isBusy}
+                        onDragStart={(event) => {
+                          if (!reorderActive) {
+                            return;
+                          }
+                          event.stopPropagation();
+                          internalDragRef.current = true;
+                          dragDepthRef.current = 0;
+                          setDropOverlayActive(false);
+                          setReorderDragPage(page.page);
+                          event.dataTransfer.effectAllowed = "move";
+                          event.dataTransfer.setData("application/x-nodoc-page", String(page.page));
+                        }}
+                        onDragOver={(event) => {
+                          if (!reorderActive || isBusy) {
+                            return;
+                          }
+                          event.preventDefault();
+                          event.stopPropagation();
+                          event.dataTransfer.dropEffect = "move";
+                        }}
+                        onDrop={(event) => {
+                          if (!reorderActive || isBusy) {
+                            return;
+                          }
+                          event.preventDefault();
+                          event.stopPropagation();
+                          const draggedPage = Number(event.dataTransfer.getData("application/x-nodoc-page") || reorderDragPage);
+                          movePreviewPage(draggedPage, page.page);
+                          internalDragRef.current = false;
+                          setReorderDragPage(null);
+                        }}
+                        onDragEnd={(event) => {
+                          event.stopPropagation();
+                          internalDragRef.current = false;
+                          dragDepthRef.current = 0;
+                          setDropOverlayActive(false);
+                          setReorderDragPage(null);
+                        }}
                         onPointerDown={(event) => beginPageDragSelection(page.page, event)}
                         onPointerEnter={(event) => continuePageDragSelection(page.page, event)}
                         onPointerUp={endPageDragSelection}
                         onPointerCancel={endPageDragSelection}
                         onClick={(event) => {
+                          if (reorderActive) {
+                            event.preventDefault();
+                            return;
+                          }
                           if (!pageToolActive || rotateAppliesToAll) {
                             event.preventDefault();
                             if (pageToolActive && !rotateAppliesToAll) {
@@ -1227,7 +1938,7 @@ export default function App() {
                         }}
                         disabled={isBusy}
                       >
-                        <img src={page.image} alt={`Page ${page.page}`} />
+                        <img src={page.image} alt={`Page ${page.page}`} draggable="false" />
                         <span>{page.page}</span>
                       </button>
                     );
