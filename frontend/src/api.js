@@ -1,5 +1,17 @@
 // Thin client for talking to the local Python sidecar.
 
+function desktopInvoke(command, args = {}) {
+  const invoke = window.__TAURI_INTERNALS__?.invoke;
+  if (!invoke) {
+    throw new Error("Desktop bridge is not available");
+  }
+  return invoke(command, args);
+}
+
+export function canUseDesktopBridge() {
+  return typeof window !== "undefined" && typeof window.__TAURI_INTERNALS__?.invoke === "function";
+}
+
 function sidecarBase() {
   const cfg = window.__PRIVATEPDF__;
   if (cfg?.port && cfg?.token) {
@@ -34,9 +46,18 @@ function uploadForm(files, fields = {}) {
   return form;
 }
 
+function buildRequestPath(path, options = {}) {
+  if (!options.asyncJob) {
+    return path;
+  }
+
+  const separator = path.includes("?") ? "&" : "?";
+  return `${path}${separator}async_job=true`;
+}
+
 async function postUpload(path, files, fields, options = {}) {
   const { base, token } = sidecarBase();
-  const res = await fetch(`${base}${path}`, {
+  const res = await fetch(`${base}${buildRequestPath(path, options)}`, {
     method: "POST",
     headers: {
       "x-privatepdf-token": token,
@@ -49,7 +70,7 @@ async function postUpload(path, files, fields, options = {}) {
 
 async function postJson(path, body, options = {}) {
   const { base, token } = sidecarBase();
-  const res = await fetch(`${base}${path}`, {
+  const res = await fetch(`${base}${buildRequestPath(path, options)}`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -63,7 +84,7 @@ async function postJson(path, body, options = {}) {
 
 async function postForm(path, form, options = {}) {
   const { base, token } = sidecarBase();
-  const res = await fetch(`${base}${path}`, {
+  const res = await fetch(`${base}${buildRequestPath(path, options)}`, {
     method: "POST",
     headers: {
       "x-privatepdf-token": token,
@@ -100,6 +121,33 @@ export async function checkHealth(options = {}) {
   const { base } = sidecarBase();
   const res = await fetch(`${base}/health`, { signal: options.signal });
   return readJson(res);
+}
+
+export async function getJobStatus(jobId, options = {}) {
+  const { base, token } = sidecarBase();
+  const res = await fetch(`${base}/results/jobs/${encodeURIComponent(jobId)}`, {
+    headers: {
+      "x-privatepdf-token": token,
+    },
+    signal: options.signal,
+  });
+  return readJson(res);
+}
+
+export function pickFilesDialog() {
+  return desktopInvoke("pick_files");
+}
+
+export function pickSavePathDialog(defaultName) {
+  return desktopInvoke("pick_save_path", { defaultName });
+}
+
+export function pickFolderDialog() {
+  return desktopInvoke("pick_folder");
+}
+
+export function copyFileToPath(sourcePath, targetPath) {
+  return desktopInvoke("copy_file_to_path", { sourcePath, targetPath });
 }
 
 export function mergeUploadedFiles(files, options) {

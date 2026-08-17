@@ -4,6 +4,7 @@ Basic image-to-PDF conversion for local/offline workflows.
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Callable
 
 from PIL import Image, UnidentifiedImageError
 
@@ -12,7 +13,11 @@ class ImageEngineError(Exception):
     """Raised for recoverable image conversion failures."""
 
 
-def images_to_pdf(input_paths: list[Path], output_path: Path) -> Path:
+def images_to_pdf(
+    input_paths: list[Path],
+    output_path: Path,
+    on_progress: Callable[[int], None] | None = None,
+) -> Path:
     if not input_paths:
         raise ImageEngineError("no input files provided")
 
@@ -31,9 +36,13 @@ def images_to_pdf(input_paths: list[Path], output_path: Path) -> Path:
                 raise ImageEngineError(f"'{src.name}' is not a supported image file") from exc
             except OSError as exc:
                 raise ImageEngineError(f"'{src.name}' could not be read: {exc}") from exc
+            if on_progress is not None:
+                on_progress(int((len(converted_images) / max(1, len(input_paths))) * 70))
 
         first_image, *rest = converted_images
         first_image.save(output_path, save_all=True, append_images=rest)
+        if on_progress is not None:
+            on_progress(100)
         return output_path
     finally:
         for image in converted_images:

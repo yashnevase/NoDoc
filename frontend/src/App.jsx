@@ -1,12 +1,15 @@
 import { useEffect, useRef, useState } from "react";
 import {
+  canUseDesktopBridge,
   checkHealth,
+  copyFileToPath,
   deletePagesPath,
   deletePagesUpload,
   downloadResult,
   downloadZip,
   extractPagesPath,
   extractPagesUpload,
+  getJobStatus,
   imagesToPdfPaths,
   imagesToPdfUpload,
   mergePathFiles,
@@ -15,6 +18,9 @@ import {
   passwordProtectUpload,
   pdfToImagesPath,
   pdfToImagesUpload,
+  pickFilesDialog,
+  pickFolderDialog,
+  pickSavePathDialog,
   previewPdfPath,
   previewPdfUpload,
   reorderPagesPath,
@@ -37,6 +43,7 @@ const imageExtensions = [".png", ".jpg", ".jpeg", ".webp", ".bmp"];
 const settingsKey = "nodoc-ui-preferences";
 const historyKey = "nodoc-job-history";
 const recentFilesKey = "nodoc-recent-files";
+const outputFolderKey = "nodoc-output-folder";
 
 const groups = [
   {
@@ -108,6 +115,7 @@ const groups = [
 
 const readyToolIds = new Set(groups.flatMap((group) => group.tools.filter((tool) => tool.status === "ready").map((tool) => tool.id)));
 const quickWatermarkAngles = [0, 90, 180, 270];
+const asyncToolIds = new Set(["merge", "images", "split", "render", "extract", "delete", "rotate", "reorder", "password", "repair", "watermark"]);
 
 function Icon({ name }) {
   const common = {
@@ -175,6 +183,32 @@ function outputPathsFromResult(result) {
     return [result.output_path];
   }
   return result.output_paths || [];
+}
+
+function sleep(ms, signal) {
+  return new Promise((resolve, reject) => {
+    const onResolve = () => {
+      signal?.removeEventListener("abort", onAbort);
+      resolve();
+    };
+    const timeoutId = window.setTimeout(onResolve, ms);
+    const onAbort = () => {
+      window.clearTimeout(timeoutId);
+      signal?.removeEventListener("abort", onAbort);
+      reject(new DOMException("Aborted", "AbortError"));
+    };
+
+    if (!signal) {
+      return;
+    }
+
+    if (signal.aborted) {
+      onAbort();
+      return;
+    }
+
+    signal.addEventListener("abort", onAbort, { once: true });
+  });
 }
 
 function pagesToRange(pages) {
@@ -268,12 +302,14 @@ export default function App() {
   const [status, setStatus] = useState("Ready");
   const [result, setResult] = useState(null);
   const [busyLabel, setBusyLabel] = useState("");
+  const [busyProgress, setBusyProgress] = useState(null);
   const [previewBusy, setPreviewBusy] = useState(false);
   const [pageDragMode, setPageDragMode] = useState(null);
   const [reorderDragPage, setReorderDragPage] = useState(null);
   const [showSettings, setShowSettings] = useState(false);
   const [jobHistory, setJobHistory] = useState([]);
   const [recentFiles, setRecentFiles] = useState([]);
+  const [outputFolder, setOutputFolder] = useState("");
   const [previewTick, setPreviewTick] = useState(0);
   const fileInputRef = useRef(null);
   const watermarkImageInputRef = useRef(null);
@@ -585,6 +621,7 @@ export default function App() {
     if (!savedPreferences) {
       setJobHistory(readStoredList(historyKey));
       setRecentFiles(readStoredList(recentFilesKey));
+      setOutputFolder(window.localStorage.getItem(outputFolderKey) || "");
       return;
     }
 
@@ -633,6 +670,7 @@ export default function App() {
 
     setJobHistory(readStoredList(historyKey));
     setRecentFiles(readStoredList(recentFilesKey));
+    setOutputFolder(window.localStorage.getItem(outputFolderKey) || "");
   }, []);
 
   useEffect(() => {
@@ -664,8 +702,16 @@ export default function App() {
   }, [recentFiles]);
 
   useEffect(() => {
+    if (outputFolder) {
+      window.localStorage.setItem(outputFolderKey, outputFolder);
+      return;
+    }
+    window.localStorage.removeItem(outputFolderKey);
+  }, [outputFolder]);
+
+  useEffect(() => {
     function handleMenuOpen() {
-      fileInputRef.current?.click();
+      void openFiles();
     }
 
     function handleMenuClear() {
@@ -715,6 +761,34 @@ export default function App() {
     setResult(null);
     rememberRecentFiles(nextItems.map((item) => item.name));
     setStatus("Files loaded");
+  }
+
+  async function openFiles() {
+    if (isBusy) {
+      return;
+    }
+
+    if (canUseDesktopBridge()) {
+      try {
+        const paths = await pickFilesDialog();
+        if (!paths?.length) {
+          return;
+        }
+        const nextItems = pathItems(paths);
+        setFileItems(nextItems);
+        setResult(null);
+        rememberRecentFiles(nextItems.map((item) => item.name));
+        setStatus(`Opened ${nextItems.length} file${nextItems.length === 1 ? "" : "s"}`);
+        return;
+      } catch (err) {
+        setStatus(`Desktop picker error: ${err.message}`);
+      }
+    }
+
+    if (fileInputRef.current) {
+      fileInputRef.current.value = "";
+      fileInputRef.current.click();
+    }
   }
 
   function removeFileAt(indexToRemove) {
@@ -935,6 +1009,7 @@ export default function App() {
     previewAbortRef.current?.abort();
     actionAbortRef.current?.abort();
     setBusyLabel("");
+    setBusyProgress(null);
     setPreviewBusy(false);
     setPageDragMode(null);
     setReorderDragPage(null);
@@ -945,6 +1020,7 @@ export default function App() {
     const controller = new AbortController();
     actionAbortRef.current = controller;
     setBusyLabel(label);
+    setBusyProgress(null);
     setStatus(label);
     try {
       await task(controller.signal);
@@ -953,6 +1029,29 @@ export default function App() {
         actionAbortRef.current = null;
       }
       setBusyLabel("");
+      setBusyProgress(null);
+    }
+  }
+
+  async function waitForJob(jobId, signal) {
+    for (;;) {
+      const job = await getJobStatus(jobId, { signal });
+      const progressValue = Number.isFinite(job.progress) ? Math.max(0, Math.min(100, job.progress)) : null;
+      const message = job.message || "Processing...";
+      const progressText = progressValue === null ? message : `${message} ${progressValue}%`;
+
+      setBusyLabel(progressText);
+      setBusyProgress(progressValue);
+      setStatus(progressText);
+
+      if (job.status === "done") {
+        return job.result || {};
+      }
+      if (job.status === "error") {
+        throw new Error(job.error || "Background job failed");
+      }
+
+      await sleep(450, signal);
     }
   }
 
@@ -967,6 +1066,25 @@ export default function App() {
     });
   }
 
+  async function chooseOutputFolder() {
+    if (!canUseDesktopBridge()) {
+      setStatus("Output folder picker is available in the desktop app.");
+      return;
+    }
+
+    try {
+      const folder = await pickFolderDialog();
+      if (!folder) {
+        setStatus("Output folder unchanged");
+        return;
+      }
+      setOutputFolder(folder);
+      setStatus("Output folder saved");
+    } catch (err) {
+      setStatus(`Output folder error: ${err.message}`);
+    }
+  }
+
   async function runActiveTool() {
     const readinessError = assertReady();
     if (readinessError) {
@@ -978,6 +1096,7 @@ export default function App() {
       setResult(null);
       try {
         let response;
+        const requestOptions = { signal, asyncJob: asyncToolIds.has(activeTool) };
         const pageRange =
           activeTool === "rotate" && rotateScope === "all"
             ? ""
@@ -986,26 +1105,26 @@ export default function App() {
               : pagesToRange(selectedPages);
 
         if (activeTool === "merge") {
-          response = hasPaths ? await mergePathFiles(pathInputs, { signal }) : await mergeUploadedFiles(uploadedFiles, { signal });
+          response = hasPaths ? await mergePathFiles(pathInputs, requestOptions) : await mergeUploadedFiles(uploadedFiles, requestOptions);
         } else if (activeTool === "images") {
-          response = hasPaths ? await imagesToPdfPaths(pathInputs, { signal }) : await imagesToPdfUpload(uploadedFiles, { signal });
+          response = hasPaths ? await imagesToPdfPaths(pathInputs, requestOptions) : await imagesToPdfUpload(uploadedFiles, requestOptions);
         } else if (activeTool === "split") {
-          response = hasPaths ? await splitPdfPath(pathInputs, { signal }) : await splitPdfUpload(uploadedFiles, { signal });
+          response = hasPaths ? await splitPdfPath(pathInputs, requestOptions) : await splitPdfUpload(uploadedFiles, requestOptions);
         } else if (activeTool === "render") {
-          response = hasPaths ? await pdfToImagesPath(pathInputs, { signal }) : await pdfToImagesUpload(uploadedFiles, { signal });
+          response = hasPaths ? await pdfToImagesPath(pathInputs, requestOptions) : await pdfToImagesUpload(uploadedFiles, requestOptions);
         } else if (activeTool === "extract") {
-          response = hasPaths ? await extractPagesPath(pathInputs, pageRange, { signal }) : await extractPagesUpload(uploadedFiles, pageRange, { signal });
+          response = hasPaths ? await extractPagesPath(pathInputs, pageRange, requestOptions) : await extractPagesUpload(uploadedFiles, pageRange, requestOptions);
         } else if (activeTool === "delete") {
-          response = hasPaths ? await deletePagesPath(pathInputs, pageRange, { signal }) : await deletePagesUpload(uploadedFiles, pageRange, { signal });
+          response = hasPaths ? await deletePagesPath(pathInputs, pageRange, requestOptions) : await deletePagesUpload(uploadedFiles, pageRange, requestOptions);
         } else if (activeTool === "rotate") {
-          response = hasPaths ? await rotatePdfPath(pathInputs, rotation, pageRange, { signal }) : await rotatePdfUpload(uploadedFiles, rotation, pageRange, { signal });
+          response = hasPaths ? await rotatePdfPath(pathInputs, rotation, pageRange, requestOptions) : await rotatePdfUpload(uploadedFiles, rotation, pageRange, requestOptions);
         } else if (activeTool === "reorder") {
           const pageOrder = pagePreview.map((page) => page.page).join(",");
-          response = hasPaths ? await reorderPagesPath(pathInputs, pageOrder, { signal }) : await reorderPagesUpload(uploadedFiles, pageOrder, { signal });
+          response = hasPaths ? await reorderPagesPath(pathInputs, pageOrder, requestOptions) : await reorderPagesUpload(uploadedFiles, pageOrder, requestOptions);
         } else if (activeTool === "password") {
-          response = hasPaths ? await passwordProtectPath(pathInputs, password, { signal }) : await passwordProtectUpload(uploadedFiles, password, { signal });
+          response = hasPaths ? await passwordProtectPath(pathInputs, password, requestOptions) : await passwordProtectUpload(uploadedFiles, password, requestOptions);
         } else if (activeTool === "repair") {
-          response = hasPaths ? await repairPdfPath(pathInputs, { signal }) : await repairPdfUpload(uploadedFiles, { signal });
+          response = hasPaths ? await repairPdfPath(pathInputs, requestOptions) : await repairPdfUpload(uploadedFiles, requestOptions);
         } else if (activeTool === "watermark") {
           const watermarkPayload = {
             text: watermarkText,
@@ -1020,11 +1139,11 @@ export default function App() {
           };
           response = watermarkMode === "image"
             ? hasPaths
-              ? await watermarkImagePath(pathInputs, watermarkImageFile, watermarkPayload, { signal })
-              : await watermarkImageUpload(uploadedFiles, watermarkImageFile, watermarkPayload, { signal })
+              ? await watermarkImagePath(pathInputs, watermarkImageFile, watermarkPayload, requestOptions)
+              : await watermarkImageUpload(uploadedFiles, watermarkImageFile, watermarkPayload, requestOptions)
             : hasPaths
-              ? await watermarkTextPath(pathInputs, watermarkPayload, { signal })
-              : await watermarkTextUpload(uploadedFiles, watermarkPayload, { signal });
+              ? await watermarkTextPath(pathInputs, watermarkPayload, requestOptions)
+              : await watermarkTextUpload(uploadedFiles, watermarkPayload, requestOptions);
         } else if (activeTool === "digital_sign") {
           response = hasPaths ? await signatureReportPath(pathInputs, { signal }) : await signatureReportUpload(uploadedFiles, { signal });
           setSignatureReport(response);
@@ -1037,6 +1156,10 @@ export default function App() {
               : "No signature fields found"
           );
           return;
+        }
+
+        if (response?.job_id) {
+          response = await waitForJob(response.job_id, signal);
         }
 
         const paths = outputPathsFromResult(response);
@@ -1056,6 +1179,17 @@ export default function App() {
   async function handleDownloadOne(path) {
     await withBusy("Preparing download...", async () => {
       try {
+        if (canUseDesktopBridge()) {
+          const targetPath = await pickSavePathDialog(pathName(path));
+          if (!targetPath) {
+            setStatus("Save cancelled");
+            return;
+          }
+          await copyFileToPath(path, targetPath);
+          setStatus("File saved");
+          return;
+        }
+
         await downloadResult(path);
         setStatus("Download started");
       } catch (err) {
@@ -1071,6 +1205,32 @@ export default function App() {
         setStatus("ZIP download started");
       } catch (err) {
         setStatus(`ZIP error: ${err.message}`);
+      }
+    });
+  }
+
+  async function exportResultsToFolder(paths = resultPaths) {
+    if (!paths.length) {
+      setStatus("No result files ready to export.");
+      return;
+    }
+    if (!canUseDesktopBridge()) {
+      setStatus("Folder export works in the desktop app.");
+      return;
+    }
+    if (!outputFolder) {
+      setStatus("Choose an output folder first.");
+      return;
+    }
+
+    await withBusy("Exporting files...", async () => {
+      try {
+        for (const path of paths) {
+          await copyFileToPath(path, `${outputFolder}\\${pathName(path)}`);
+        }
+        setStatus(paths.length === 1 ? "Exported 1 file to output folder" : `Exported ${paths.length} files to output folder`);
+      } catch (err) {
+        setStatus(`Export error: ${err.message}`);
       }
     });
   }
@@ -1094,7 +1254,7 @@ export default function App() {
             <Icon name="upload" />
             <strong>Drop files into NoDoc</strong>
             <span>PDF, PNG, JPG, WEBP, BMP</span>
-            <button type="button" onClick={() => fileInputRef.current?.click()} disabled={isBusy}>
+            <button type="button" onClick={() => void openFiles()} disabled={isBusy}>
               Browse files
             </button>
           </div>
@@ -1117,11 +1277,17 @@ export default function App() {
             <section className="settings-section">
               <h3>Workspace</h3>
               <div className="settings-actions">
-                <button type="button" onClick={() => fileInputRef.current?.click()}>Open files</button>
+                <button type="button" onClick={() => void openFiles()}>Open files</button>
                 <button type="button" onClick={() => setPreviewTick((value) => value + 1)} disabled={!exactlyOnePdfSelected}>Reload preview</button>
                 <button type="button" onClick={cancelCurrentWork} disabled={!showCancelAction}>Cancel task</button>
               </div>
-              <p className="settings-note">Downloads go to your current browser or desktop app download location.</p>
+              <div className="settings-actions">
+                <button type="button" onClick={() => void chooseOutputFolder()} disabled={isBusy}>Choose output folder</button>
+                <button type="button" onClick={() => setOutputFolder("")} disabled={!outputFolder || isBusy}>Clear output folder</button>
+              </div>
+              <p className="settings-note">
+                {outputFolder ? `Output folder: ${outputFolder}` : "Downloads go to your current browser or desktop app download location."}
+              </p>
             </section>
 
             <section className="settings-section">
@@ -1150,6 +1316,12 @@ export default function App() {
                             <span>ZIP</span>
                           </button>
                         )}
+                        {canUseDesktopBridge() && outputFolder && entry.paths?.length ? (
+                          <button type="button" onClick={() => void exportResultsToFolder(entry.paths)} disabled={isBusy}>
+                            <Icon name="folder" />
+                            <span>Export</span>
+                          </button>
+                        ) : null}
                       </div>
                     </li>
                   ))}
@@ -1182,7 +1354,7 @@ export default function App() {
 
       {isBusy && (
         <div className="busy-bar" role="status" aria-live="polite">
-          <span />
+          <span>{busyProgress !== null ? <i style={{ width: `${busyProgress}%` }} /> : null}</span>
           <strong>{busyLabel}</strong>
         </div>
       )}
@@ -1196,7 +1368,7 @@ export default function App() {
           </div>
         </div>
         <div className="quick-actions">
-          <button type="button" onClick={() => fileInputRef.current?.click()} disabled={isBusy} title="Browse files">
+          <button type="button" onClick={() => void openFiles()} disabled={isBusy} title="Browse files">
             <Icon name="upload" />
             <span>Open</span>
           </button>
@@ -1262,6 +1434,12 @@ export default function App() {
                     <span>Download ZIP</span>
                   </button>
                 )}
+                {canUseDesktopBridge() && outputFolder ? (
+                  <button type="button" onClick={() => void exportResultsToFolder()} disabled={isBusy}>
+                    <Icon name="folder" />
+                    <span>Export</span>
+                  </button>
+                ) : null}
                 <span>{resultPaths.slice(0, 3).map((path) => pathName(path)).join(", ")}</span>
               </div>
             )}
@@ -1366,7 +1544,7 @@ export default function App() {
             <Icon name="upload" />
             <strong>Drop files</strong>
             <span className="dropzone-hint">PDF, PNG, JPG, WEBP, BMP</span>
-            <button type="button" onClick={() => fileInputRef.current?.click()} disabled={isBusy}>
+            <button type="button" onClick={() => void openFiles()} disabled={isBusy}>
               Browse
             </button>
             <input
@@ -1973,6 +2151,12 @@ export default function App() {
                   <span>Download ZIP</span>
                 </button>
               )}
+              {canUseDesktopBridge() && outputFolder ? (
+                <button type="button" onClick={() => void exportResultsToFolder()} disabled={isBusy}>
+                  <Icon name="folder" />
+                  <span>Export</span>
+                </button>
+              ) : null}
             </>
           )}
         </div>

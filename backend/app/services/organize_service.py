@@ -9,6 +9,7 @@ from __future__ import annotations
 import shutil
 import uuid
 from pathlib import Path
+from typing import Callable
 
 from app.config import settings
 from engines.images.to_pdf import images_to_pdf as engine_images_to_pdf
@@ -43,14 +44,14 @@ def safe_output_path(first_input: Path, suffix: str) -> Path:
     return candidate
 
 
-def merge_files(input_paths: list[Path]) -> Path:
+def merge_files(input_paths: list[Path], on_progress: Callable[[int], None] | None = None) -> Path:
     output = safe_output_path(input_paths[0], "merged")
-    return engine_merge(input_paths, output)
+    return engine_merge(input_paths, output, on_progress=on_progress)
 
 
-def images_to_pdf_files(input_paths: list[Path]) -> Path:
+def images_to_pdf_files(input_paths: list[Path], on_progress: Callable[[int], None] | None = None) -> Path:
     output = safe_output_path(input_paths[0], "images")
-    return engine_images_to_pdf(input_paths, output)
+    return engine_images_to_pdf(input_paths, output, on_progress=on_progress)
 
 
 def extract_pages_file(input_path: Path, page_indices: list[int]) -> Path:
@@ -99,6 +100,7 @@ def add_text_watermark_file(
     opacity: float = 0.22,
     size: float = 48.0,
     color: str = "#b02730",
+    on_progress: Callable[[int], None] | None = None,
 ) -> Path:
     output = safe_output_path(input_path, "watermarked")
     return engine_add_text_watermark(
@@ -113,6 +115,7 @@ def add_text_watermark_file(
         opacity=opacity,
         size=size,
         color=color,
+        on_progress=on_progress,
     )
 
 
@@ -125,6 +128,7 @@ def add_image_watermark_file(
     angle: float = -45.0,
     opacity: float = 0.22,
     size: float = 48.0,
+    on_progress: Callable[[int], None] | None = None,
 ) -> Path:
     output = safe_output_path(input_path, "watermarked")
     return engine_add_image_watermark(
@@ -136,17 +140,18 @@ def add_image_watermark_file(
         angle=angle,
         opacity=opacity,
         size=size,
+        on_progress=on_progress,
     )
 
 
-def split_pdf_file(input_path: Path) -> list[Path]:
+def split_pdf_file(input_path: Path, on_progress: Callable[[int], None] | None = None) -> list[Path]:
     output_dir = input_path.parent / "processed" / f"{input_path.stem}_split"
-    return engine_split_pdf(input_path, output_dir)
+    return engine_split_pdf(input_path, output_dir, on_progress=on_progress)
 
 
-def pdf_to_images_file(input_path: Path) -> list[Path]:
+def pdf_to_images_file(input_path: Path, on_progress: Callable[[int], None] | None = None) -> list[Path]:
     output_dir = input_path.parent / "processed" / f"{input_path.stem}_images"
-    return engine_pdf_to_images(input_path, output_dir)
+    return engine_pdf_to_images(input_path, output_dir, on_progress=on_progress)
 
 
 def create_upload_job_dir() -> Path:

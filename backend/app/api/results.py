@@ -9,6 +9,7 @@ from pydantic import BaseModel, field_validator
 
 from app.auth import require_token
 from app.config import settings
+from app.jobs.manager import jobs
 
 router = APIRouter(dependencies=[Depends(require_token)])
 
@@ -22,6 +23,18 @@ class ZipRequest(BaseModel):
         if not value:
             raise ValueError("paths must not be empty")
         return value
+
+
+class JobStatusResponse(BaseModel):
+    id: str
+    kind: str
+    status: str
+    progress: int
+    message: str
+    result: dict | None = None
+    error: str | None = None
+    created_at: str
+    updated_at: str
 
 
 def allowed_result_path(raw_path: str) -> Path:
@@ -57,3 +70,11 @@ async def download_zip(req: ZipRequest) -> FileResponse:
             archive.write(result_path, arcname=archive_name)
 
     return FileResponse(zip_path, media_type="application/zip", filename="nodoc-results.zip")
+
+
+@router.get("/jobs/{job_id}", response_model=JobStatusResponse)
+async def job_status(job_id: str) -> JobStatusResponse:
+    payload = jobs.serialize_job(job_id)
+    if payload is None:
+        raise HTTPException(status_code=404, detail="job not found")
+    return JobStatusResponse(**payload)

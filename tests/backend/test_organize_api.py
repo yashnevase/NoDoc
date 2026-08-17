@@ -5,6 +5,7 @@ the merge endpoint end-to-end, without a running network server.
 from __future__ import annotations
 
 from pathlib import Path
+import time
 
 import pikepdf
 import pytest
@@ -74,6 +75,20 @@ def make_image(path: Path, color: str) -> Path:
     return path
 
 
+def wait_for_job(job_id: str) -> dict:
+    for _ in range(40):
+        resp = client.get(
+            f"/results/jobs/{job_id}",
+            headers={"x-privatepdf-token": settings.auth_token},
+        )
+        assert resp.status_code == 200
+        payload = resp.json()
+        if payload["status"] in {"done", "error"}:
+            return payload
+        time.sleep(0.05)
+    raise AssertionError(f"Job {job_id} did not finish in time")
+
+
 def test_merge_requires_token(tmp_path: Path):
     a = make_pdf(tmp_path / "a.pdf")
     resp = client.post("/organize/merge", json={"input_paths": [str(a)]})
@@ -109,6 +124,27 @@ def test_merge_upload_succeeds_with_token(tmp_path: Path):
 
     assert resp.status_code == 200
     output_path = Path(resp.json()["output_path"])
+    with pikepdf.open(output_path) as result:
+        assert len(result.pages) == 3
+
+
+def test_merge_async_job_succeeds_with_token(tmp_path: Path):
+    a = make_pdf(tmp_path / "a.pdf", 2)
+    b = make_pdf(tmp_path / "b.pdf", 1)
+    resp = client.post(
+        "/organize/merge",
+        params={"async_job": "true"},
+        json={"input_paths": [str(a), str(b)]},
+        headers={"x-privatepdf-token": settings.auth_token},
+    )
+
+    assert resp.status_code == 200
+    job_id = resp.json()["job_id"]
+    payload = wait_for_job(job_id)
+    assert payload["status"] == "done"
+    assert payload["progress"] == 100
+    assert payload["result"]["output_path"]
+    output_path = Path(payload["result"]["output_path"])
     with pikepdf.open(output_path) as result:
         assert len(result.pages) == 3
 
@@ -432,6 +468,32 @@ def test_watermark_image_upload_succeeds_with_token(tmp_path: Path):
         resources = result.pages[0].Resources.get("/XObject", {})
         assert resources
         assert not result.pages[1].Resources.get("/XObject", {})
+
+
+def test_watermark_image_upload_async_job_succeeds_with_token(tmp_path: Path):
+    source = make_pdf(tmp_path / "image-watermark-async.pdf", 2)
+    mark = make_image(tmp_path / "signature-async.png", "green")
+    with source.open("rb") as source_file, mark.open("rb") as image_file:
+        resp = client.post(
+            "/organize/watermark-image-upload",
+            params={"async_job": "true"},
+            files=[
+                ("files", ("image-watermark-async.pdf", source_file, "application/pdf")),
+                ("image", ("signature-async.png", image_file, "image/png")),
+            ],
+            data={"pages": "1", "position": "center", "angle": "15", "size": "52", "opacity": "0.5"},
+            headers={"x-privatepdf-token": settings.auth_token},
+        )
+
+    assert resp.status_code == 200
+    payload = wait_for_job(resp.json()["job_id"])
+    assert payload["status"] == "done"
+    assert payload["progress"] == 100
+    output_path = Path(payload["result"]["output_path"])
+    with pikepdf.open(output_path) as result:
+        assert len(result.pages) == 2
+        resources = result.pages[0].Resources.get("/XObject", {})
+        assert resources
 
 
 def test_signature_report_upload_detects_none(tmp_path: Path):

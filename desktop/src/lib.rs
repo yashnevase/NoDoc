@@ -1,4 +1,5 @@
 use std::{
+    fs,
     io::{BufRead, BufReader},
     path::PathBuf,
     process::{Child, Command, Stdio},
@@ -6,10 +7,12 @@ use std::{
 };
 
 use tauri::{
+    AppHandle,
     menu::{AboutMetadataBuilder, MenuBuilder, PredefinedMenuItem, SubmenuBuilder},
     path::BaseDirectory,
     Manager,
 };
+use tauri_plugin_dialog::{DialogExt, FilePath};
 use uuid::Uuid;
 
 struct SidecarProcess(Mutex<Option<Child>>);
@@ -100,10 +103,98 @@ fn dispatch_dom_event(window: &tauri::WebviewWindow, event_name: &str) -> tauri:
     window.eval(format!("window.dispatchEvent(new CustomEvent('{event_name}'));"))
 }
 
+fn file_path_to_string(path: FilePath) -> Option<String> {
+    match path {
+        FilePath::Path(value) => value.into_os_string().into_string().ok(),
+        #[cfg(target_os = "macos")]
+        FilePath::Url(value) => value.to_file_path().ok().and_then(|path| path.into_os_string().into_string().ok()),
+        #[cfg(not(target_os = "macos"))]
+        FilePath::Url(value) => value.to_file_path().ok().and_then(|path| path.into_os_string().into_string().ok()),
+    }
+}
+
+#[tauri::command]
+async fn pick_files(app: AppHandle) -> Result<Vec<String>, String> {
+    let (tx, rx) = std::sync::mpsc::channel();
+    app.dialog()
+        .file()
+        .add_filter("NoDoc files", &["pdf", "png", "jpg", "jpeg", "webp", "bmp"])
+        .pick_files(move |paths| {
+            let _ = tx.send(paths);
+        });
+
+    let selected = rx
+        .recv()
+        .map_err(|error| format!("Could not receive selected files: {error}"))?;
+
+    Ok(selected
+        .unwrap_or_default()
+        .into_iter()
+        .filter_map(file_path_to_string)
+        .collect())
+}
+
+#[tauri::command]
+async fn pick_save_path(app: AppHandle, default_name: Option<String>) -> Result<Option<String>, String> {
+    let (tx, rx) = std::sync::mpsc::channel();
+    let mut builder = app
+        .dialog()
+        .file()
+        .add_filter("PDF Document", &["pdf"]);
+
+    if let Some(name) = default_name.as_deref() {
+        builder = builder.set_file_name(name);
+    }
+
+    builder.save_file(move |path| {
+        let _ = tx.send(path);
+    });
+
+    let selected = rx
+        .recv()
+        .map_err(|error| format!("Could not receive save path: {error}"))?;
+
+    Ok(selected.and_then(file_path_to_string))
+}
+
+#[tauri::command]
+async fn pick_folder(app: AppHandle) -> Result<Option<String>, String> {
+    let (tx, rx) = std::sync::mpsc::channel();
+    app.dialog().file().pick_folder(move |path| {
+        let _ = tx.send(path);
+    });
+
+    let selected = rx
+        .recv()
+        .map_err(|error| format!("Could not receive selected folder: {error}"))?;
+
+    Ok(selected.and_then(file_path_to_string))
+}
+
+#[tauri::command]
+async fn copy_file_to_path(source_path: String, target_path: String) -> Result<(), String> {
+    let source = PathBuf::from(source_path);
+    let target = PathBuf::from(target_path);
+
+    if !source.exists() {
+        return Err("Source file was not found".to_string());
+    }
+
+    if let Some(parent) = target.parent() {
+        fs::create_dir_all(parent).map_err(|error| format!("Could not create target folder: {error}"))?;
+    }
+
+    fs::copy(&source, &target).map_err(|error| format!("Could not save file: {error}"))?;
+    Ok(())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_opener::init())
+        .invoke_handler(tauri::generate_handler![pick_files, pick_save_path, pick_folder, copy_file_to_path])
         .setup(|app| {
             let about = PredefinedMenuItem::about(
                 app,

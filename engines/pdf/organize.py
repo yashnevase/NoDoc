@@ -9,6 +9,7 @@ from __future__ import annotations
 from io import BytesIO
 from pathlib import Path
 from math import cos, radians, sin
+from typing import Callable
 
 import pikepdf
 from PIL import Image
@@ -206,19 +207,25 @@ def _build_image_watermark_stream(
     ).encode("ascii", errors="ignore")
 
 
-def merge(input_paths: list[Path], output_path: Path) -> Path:
+def merge(
+    input_paths: list[Path],
+    output_path: Path,
+    on_progress: Callable[[int], None] | None = None,
+) -> Path:
     if not input_paths:
         raise PdfEngineError("no input files provided")
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
     with pikepdf.new() as target:
-        for src in input_paths:
+        for index, src in enumerate(input_paths, start=1):
             if not src.exists():
                 raise PdfEngineError(f"input file not found: {src.name}")
             try:
                 with pikepdf.open(src) as doc:
                     target.pages.extend(doc.pages)
+                    if on_progress is not None:
+                        on_progress(int((index / max(1, len(input_paths))) * 100))
             except pikepdf.PasswordError as exc:
                 raise PdfEngineError(f"'{src.name}' is password-protected") from exc
             except pikepdf.PdfError as exc:
@@ -327,6 +334,7 @@ def add_text_watermark(
     opacity: float = 0.22,
     size: float = 48.0,
     color: str = "#b02730",
+    on_progress: Callable[[int], None] | None = None,
 ) -> Path:
     if kind == "text" and not text.strip():
         raise PdfEngineError("watermark text must not be empty")
@@ -339,7 +347,8 @@ def add_text_watermark(
     try:
         with pikepdf.open(input_path) as doc:
             target_pages = range(len(doc.pages)) if page_indices is None else page_indices
-            for i in target_pages:
+            target_pages = list(target_pages)
+            for offset, i in enumerate(target_pages, start=1):
                 page = doc.pages[i]
                 gs_name = page.add_resource(
                     pikepdf.Dictionary({"/CA": opacity, "/ca": opacity}),
@@ -367,6 +376,8 @@ def add_text_watermark(
                         content.replace(b"/NoDocGS1", f"/{str(gs_name)[1:]}".encode("ascii")),
                     )
                 )
+                if on_progress is not None:
+                    on_progress(int((offset / max(1, len(target_pages))) * 100))
 
             doc.save(output_path)
     except pikepdf.PasswordError as exc:
@@ -387,6 +398,7 @@ def add_image_watermark(
     angle: float = -45.0,
     opacity: float = 0.22,
     size: float = 48.0,
+    on_progress: Callable[[int], None] | None = None,
 ) -> Path:
     output_path.parent.mkdir(parents=True, exist_ok=True)
     opacity = _clamp(opacity, 0.05, 1.0)
@@ -396,7 +408,8 @@ def add_image_watermark(
         with pikepdf.open(input_path) as doc:
             image_stream, image_width, image_height = _load_image_xobject(doc, image_path)
             target_pages = range(len(doc.pages)) if page_indices is None else page_indices
-            for i in target_pages:
+            target_pages = list(target_pages)
+            for offset, i in enumerate(target_pages, start=1):
                 page = doc.pages[i]
                 gs_name = page.add_resource(
                     pikepdf.Dictionary({"/CA": opacity, "/ca": opacity}),
@@ -423,6 +436,8 @@ def add_image_watermark(
                         content.replace(b"/NoDocGS1", f"/{str(gs_name)[1:]}".encode("ascii")),
                     )
                 )
+                if on_progress is not None:
+                    on_progress(int((offset / max(1, len(target_pages))) * 100))
 
             doc.save(output_path)
     except pikepdf.PasswordError as exc:

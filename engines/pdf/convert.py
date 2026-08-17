@@ -6,6 +6,7 @@ from __future__ import annotations
 import base64
 import io
 from pathlib import Path
+from typing import Callable
 
 import pikepdf
 import pypdfium2 as pdfium
@@ -14,7 +15,11 @@ from PIL import Image
 from engines.pdf.organize import PdfEngineError
 
 
-def split_pdf(input_path: Path, output_dir: Path) -> list[Path]:
+def split_pdf(
+    input_path: Path,
+    output_dir: Path,
+    on_progress: Callable[[int], None] | None = None,
+) -> list[Path]:
     output_dir.mkdir(parents=True, exist_ok=True)
 
     try:
@@ -26,6 +31,8 @@ def split_pdf(input_path: Path, output_dir: Path) -> list[Path]:
                     single_page_pdf.pages.append(page)
                     single_page_pdf.save(output_path)
                 output_paths.append(output_path)
+                if on_progress is not None:
+                    on_progress(int((index / max(1, len(doc.pages))) * 100))
             return output_paths
     except pikepdf.PasswordError as exc:
         raise PdfEngineError(f"'{input_path.name}' is password-protected") from exc
@@ -33,7 +40,11 @@ def split_pdf(input_path: Path, output_dir: Path) -> list[Path]:
         raise PdfEngineError(f"'{input_path.name}' could not be read: {exc}") from exc
 
 
-def pdf_to_images(input_path: Path, output_dir: Path) -> list[Path]:
+def pdf_to_images(
+    input_path: Path,
+    output_dir: Path,
+    on_progress: Callable[[int], None] | None = None,
+) -> list[Path]:
     output_dir.mkdir(parents=True, exist_ok=True)
 
     try:
@@ -51,6 +62,8 @@ def pdf_to_images(input_path: Path, output_dir: Path) -> list[Path]:
             bitmap.close()
             page.close()
             output_paths.append(output_path)
+            if on_progress is not None:
+                on_progress(int(((index + 1) / max(1, len(pdf))) * 100))
         return output_paths
     finally:
         pdf.close()
