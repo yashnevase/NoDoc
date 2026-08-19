@@ -3,7 +3,11 @@ from __future__ import annotations
 from pydantic import BaseModel, Field
 from fastapi import APIRouter
 
-from app.db import store
+from app.services.job_history_service import (
+    get_recent_files as load_recent_files,
+    list_job_history as load_job_history,
+    save_recent_files as store_recent_files,
+)
 
 router = APIRouter(prefix="/library", tags=["library"])
 
@@ -31,15 +35,14 @@ class JobHistoryResponse(BaseModel):
 
 @router.get("/recent", response_model=RecentFilesResponse)
 async def get_recent_files() -> RecentFilesResponse:
-    return RecentFilesResponse(names=store.get_recent_files())
+    return RecentFilesResponse(names=load_recent_files())
 
 
 @router.post("/recent", response_model=RecentFilesResponse)
 async def save_recent_files(payload: RecentFilesRequest) -> RecentFilesResponse:
-    return RecentFilesResponse(names=store.save_recent_files(payload.names))
+    return RecentFilesResponse(names=store_recent_files(payload.names))
 
 
 @router.get("/history", response_model=JobHistoryResponse)
 async def get_history() -> JobHistoryResponse:
-    return JobHistoryResponse(items=[JobHistoryItem(**row) for row in store.list_job_history()])
-
+    return JobHistoryResponse(items=[JobHistoryItem(**row) for row in load_job_history()])

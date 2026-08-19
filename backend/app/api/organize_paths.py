@@ -1,0 +1,419 @@
+from __future__ import annotations
+
+from pathlib import Path
+
+from fastapi import APIRouter, Depends, HTTPException
+
+from app.auth import require_token
+from app.api.organize_helpers import (
+    convert_response,
+    enqueue_job,
+    merge_response,
+    multi_output_response,
+    parse_page_order,
+    parse_page_ranges,
+    preview_manifest_response,
+    preview_page_response,
+    preview_response,
+    register_preview_session,
+    require_single_input,
+    resolve_preview_session,
+    signature_report_response,
+)
+from app.api.organize_models import (
+    CompressRequest,
+    ConvertResponse,
+    DuplicateRequest,
+    JobAcceptedResponse,
+    MergeRequest,
+    MergeResponse,
+    MultiOutputResponse,
+    PageNumbersRequest,
+    PreviewManifestResponse,
+    PreviewPageResponse,
+    PreviewResponse,
+    ReverseRequest,
+    SignatureReport,
+)
+from app.services.organize_service import (
+    add_page_numbers_file,
+    add_text_watermark_file,
+    compress_pdf_file,
+    delete_pages_file,
+    duplicate_pages_file,
+    extract_pages_file,
+    images_to_pdf_files,
+    inspect_signatures_file,
+    merge_files,
+    password_protect_file,
+    pdf_to_images_file,
+    reorder_pages_file,
+    repair_pdf_file,
+    reverse_pages_file,
+    rotate_pdf_file,
+    split_pdf_file,
+)
+from engines.images.to_pdf import ImageEngineError
+from engines.pdf.convert import render_pdf_manifest, render_pdf_page, render_pdf_preview
+from engines.pdf.organize import PdfEngineError
+
+router = APIRouter(dependencies=[Depends(require_token)])
+
+
+@router.post("/merge", response_model=MergeResponse | JobAcceptedResponse)
+async def merge(req: MergeRequest, async_job: bool = False) -> MergeResponse | JobAcceptedResponse:
+    input_paths = [Path(path) for path in req.input_paths]
+    if async_job:
+        return enqueue_job(
+            "merge",
+            lambda progress: {
+                "output_path": str(
+                    merge_files(
+                        input_paths,
+                        on_progress=lambda value: progress(value, "Merging PDFs"),
+                    )
+                )
+            },
+        )
+    try:
+        return merge_response(merge_files(input_paths))
+    except PdfEngineError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/images-to-pdf", response_model=ConvertResponse | JobAcceptedResponse)
+async def images_to_pdf(req: MergeRequest, async_job: bool = False) -> ConvertResponse | JobAcceptedResponse:
+    input_paths = [Path(path) for path in req.input_paths]
+    if async_job:
+        return enqueue_job(
+            "images_to_pdf",
+            lambda progress: {
+                "output_path": str(
+                    images_to_pdf_files(
+                        input_paths,
+                        on_progress=lambda value: progress(value, "Converting images"),
+                    )
+                )
+            },
+        )
+    try:
+        return convert_response(images_to_pdf_files(input_paths))
+    except ImageEngineError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/split-pdf", response_model=MultiOutputResponse | JobAcceptedResponse)
+async def split_pdf(req: MergeRequest, async_job: bool = False) -> MultiOutputResponse | JobAcceptedResponse:
+    input_path = require_single_input(req.input_paths, "split-pdf expects exactly one input PDF")
+    if async_job:
+        return enqueue_job(
+            "split_pdf",
+            lambda progress: {
+                "output_paths": [
+                    str(path)
+                    for path in split_pdf_file(
+                        input_path,
+                        on_progress=lambda value: progress(value, "Splitting pages"),
+                    )
+                ]
+            },
+        )
+    try:
+        return multi_output_response(split_pdf_file(input_path))
+    except PdfEngineError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/pdf-to-images", response_model=MultiOutputResponse | JobAcceptedResponse)
+async def pdf_to_images(req: MergeRequest, async_job: bool = False) -> MultiOutputResponse | JobAcceptedResponse:
+    input_path = require_single_input(req.input_paths, "pdf-to-images expects exactly one input PDF")
+    if async_job:
+        return enqueue_job(
+            "pdf_to_images",
+            lambda progress: {
+                "output_paths": [
+                    str(path)
+                    for path in pdf_to_images_file(
+                        input_path,
+                        on_progress=lambda value: progress(value, "Rendering pages"),
+                    )
+                ]
+            },
+        )
+    try:
+        return multi_output_response(pdf_to_images_file(input_path))
+    except PdfEngineError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/preview-pdf", response_model=PreviewResponse)
+async def preview_pdf(req: MergeRequest) -> PreviewResponse:
+    input_path = require_single_input(req.input_paths, "preview-pdf expects exactly one input PDF")
+    try:
+        return preview_response(render_pdf_preview(input_path))
+    except PdfEngineError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/preview-manifest", response_model=PreviewManifestResponse)
+async def preview_manifest(req: MergeRequest) -> PreviewManifestResponse:
+    input_path = require_single_input(req.input_paths, "preview-manifest expects exactly one input PDF")
+    try:
+        preview_id = register_preview_session(input_path)
+        return preview_manifest_response(preview_id, render_pdf_manifest(input_path))
+    except PdfEngineError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.get("/preview-page", response_model=PreviewPageResponse)
+async def preview_page(preview_id: str | None = None, path: str | None = None, page: int = 1, scale: float = 0.55) -> PreviewPageResponse:
+    try:
+        preview_path = resolve_preview_session(preview_id, path)
+        return preview_page_response(render_pdf_page(preview_path, page, scale=scale))
+    except PdfEngineError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/extract-pages", response_model=ConvertResponse | JobAcceptedResponse)
+async def extract_pages(req: MergeRequest, pages: str = "", async_job: bool = False) -> ConvertResponse | JobAcceptedResponse:
+    input_path = require_single_input(req.input_paths, "extract-pages expects exactly one input PDF")
+    page_indices = parse_page_ranges(pages)
+    if async_job:
+        return enqueue_job(
+            "extract_pages",
+            lambda progress: {"output_path": str(extract_pages_file(input_path, page_indices))},
+        )
+    try:
+        return convert_response(extract_pages_file(input_path, page_indices))
+    except (PdfEngineError, IndexError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/delete-pages", response_model=ConvertResponse | JobAcceptedResponse)
+async def delete_pages(req: MergeRequest, pages: str = "", async_job: bool = False) -> ConvertResponse | JobAcceptedResponse:
+    input_path = require_single_input(req.input_paths, "delete-pages expects exactly one input PDF")
+    page_indices = parse_page_ranges(pages)
+    if async_job:
+        return enqueue_job(
+            "delete_pages",
+            lambda progress: {"output_path": str(delete_pages_file(input_path, page_indices))},
+        )
+    try:
+        return convert_response(delete_pages_file(input_path, page_indices))
+    except (PdfEngineError, IndexError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/rotate-pdf", response_model=ConvertResponse | JobAcceptedResponse)
+async def rotate_pdf(req: MergeRequest, degrees: int, pages: str = "", async_job: bool = False) -> ConvertResponse | JobAcceptedResponse:
+    input_path = require_single_input(req.input_paths, "rotate-pdf expects exactly one input PDF")
+    page_indices = parse_page_ranges(pages) if pages.strip() else None
+    if async_job:
+        return enqueue_job(
+            "rotate_pdf",
+            lambda progress: {"output_path": str(rotate_pdf_file(input_path, degrees, page_indices))},
+        )
+    try:
+        return convert_response(rotate_pdf_file(input_path, degrees, page_indices))
+    except (PdfEngineError, IndexError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/reorder-pages", response_model=ConvertResponse | JobAcceptedResponse)
+async def reorder_pages(req: MergeRequest, order: str = "", async_job: bool = False) -> ConvertResponse | JobAcceptedResponse:
+    input_path = require_single_input(req.input_paths, "reorder-pages expects exactly one input PDF")
+    page_indices = parse_page_order(order)
+    if async_job:
+        return enqueue_job(
+            "reorder_pages",
+            lambda progress: {"output_path": str(reorder_pages_file(input_path, page_indices))},
+        )
+    try:
+        return convert_response(reorder_pages_file(input_path, page_indices))
+    except (PdfEngineError, IndexError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/reverse-pages", response_model=ConvertResponse | JobAcceptedResponse)
+async def reverse_pages(req: ReverseRequest, async_job: bool = False) -> ConvertResponse | JobAcceptedResponse:
+    input_path = Path(req.input_paths[0])
+    if async_job:
+        return enqueue_job(
+            "reverse_pages",
+            lambda progress: {"output_path": str(reverse_pages_file(input_path))},
+        )
+    try:
+        return convert_response(reverse_pages_file(input_path))
+    except PdfEngineError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/duplicate-pages", response_model=ConvertResponse | JobAcceptedResponse)
+async def duplicate_pages(req: DuplicateRequest, async_job: bool = False) -> ConvertResponse | JobAcceptedResponse:
+    input_path = Path(req.input_paths[0])
+    page_indices = parse_page_ranges(req.pages)
+    if async_job:
+        return enqueue_job(
+            "duplicate_pages",
+            lambda progress: {"output_path": str(duplicate_pages_file(input_path, page_indices))},
+        )
+    try:
+        return convert_response(duplicate_pages_file(input_path, page_indices))
+    except (PdfEngineError, IndexError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/page-numbers", response_model=ConvertResponse | JobAcceptedResponse)
+async def page_numbers(req: PageNumbersRequest, async_job: bool = False) -> ConvertResponse | JobAcceptedResponse:
+    input_path = Path(req.input_paths[0])
+    page_indices = parse_page_ranges(req.pages) if req.pages.strip() else None
+    if async_job:
+        return enqueue_job(
+            "page_numbers",
+            lambda progress: {
+                "output_path": str(
+                    add_page_numbers_file(
+                        input_path,
+                        page_indices=page_indices,
+                        position=req.position,
+                        size=req.size,
+                        opacity=req.opacity,
+                        color=req.color,
+                        prefix=req.prefix,
+                        suffix=req.suffix,
+                        start=req.start,
+                    )
+                )
+            },
+        )
+    try:
+        return convert_response(
+            add_page_numbers_file(
+                input_path,
+                page_indices=page_indices,
+                position=req.position,
+                size=req.size,
+                opacity=req.opacity,
+                color=req.color,
+                prefix=req.prefix,
+                suffix=req.suffix,
+                start=req.start,
+            )
+        )
+    except PdfEngineError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/password-protect", response_model=ConvertResponse | JobAcceptedResponse)
+async def password_protect(req: MergeRequest, password: str, async_job: bool = False) -> ConvertResponse | JobAcceptedResponse:
+    input_path = require_single_input(req.input_paths, "password-protect expects exactly one input PDF")
+    if async_job:
+        return enqueue_job(
+            "password_protect",
+            lambda progress: {"output_path": str(password_protect_file(input_path, password))},
+        )
+    try:
+        return convert_response(password_protect_file(input_path, password))
+    except PdfEngineError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/signature-report", response_model=SignatureReport)
+async def signature_report(req: MergeRequest) -> SignatureReport:
+    input_path = require_single_input(req.input_paths, "signature-report expects exactly one input PDF")
+    try:
+        return signature_report_response(inspect_signatures_file(input_path))
+    except PdfEngineError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/repair-pdf", response_model=ConvertResponse | JobAcceptedResponse)
+async def repair_pdf(req: MergeRequest, async_job: bool = False) -> ConvertResponse | JobAcceptedResponse:
+    input_path = require_single_input(req.input_paths, "repair-pdf expects exactly one input PDF")
+    if async_job:
+        return enqueue_job(
+            "repair_pdf",
+            lambda progress: {"output_path": str(repair_pdf_file(input_path))},
+        )
+    try:
+        return convert_response(repair_pdf_file(input_path))
+    except PdfEngineError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/compress-pdf", response_model=ConvertResponse | JobAcceptedResponse)
+async def compress_pdf(req: CompressRequest, async_job: bool = False) -> ConvertResponse | JobAcceptedResponse:
+    input_path = Path(req.input_paths[0])
+    if async_job:
+        return enqueue_job(
+            "compress_pdf",
+            lambda progress: {
+                "output_path": str(
+                    compress_pdf_file(
+                        input_path,
+                        preset=req.preset,
+                        on_progress=lambda value: progress(value, "Compressing PDF"),
+                    )
+                )
+            },
+        )
+    try:
+        return convert_response(compress_pdf_file(input_path, preset=req.preset))
+    except PdfEngineError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/watermark-text", response_model=ConvertResponse | JobAcceptedResponse)
+async def watermark_text(
+    req: MergeRequest,
+    text: str,
+    mode: str = "text",
+    preset: str = "verified",
+    pages: str = "",
+    position: str = "center",
+    angle: float = -45.0,
+    size: float = 48.0,
+    opacity: float = 0.22,
+    color: str = "#b02730",
+    async_job: bool = False,
+) -> ConvertResponse | JobAcceptedResponse:
+    input_path = require_single_input(req.input_paths, "watermark-text expects exactly one input PDF")
+    page_indices = parse_page_ranges(pages) if pages.strip() else None
+    if async_job:
+        return enqueue_job(
+            "watermark_text",
+            lambda progress: {
+                "output_path": str(
+                    add_text_watermark_file(
+                        input_path,
+                        text,
+                        mode=mode,
+                        preset=preset,
+                        page_indices=page_indices,
+                        position=position,
+                        angle=angle,
+                        size=size,
+                        opacity=opacity,
+                        color=color,
+                        on_progress=lambda value: progress(value, "Applying watermark"),
+                    )
+                )
+            },
+        )
+    try:
+        return convert_response(
+            add_text_watermark_file(
+                input_path,
+                text,
+                mode=mode,
+                preset=preset,
+                page_indices=page_indices,
+                position=position,
+                angle=angle,
+                size=size,
+                opacity=opacity,
+                color=color,
+            )
+        )
+    except PdfEngineError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc

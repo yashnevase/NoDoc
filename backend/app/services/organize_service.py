@@ -58,6 +58,22 @@ def images_to_pdf_files(input_paths: list[Path], on_progress: Callable[[int], No
     return engine_images_to_pdf(input_paths, output, on_progress=on_progress)
 
 
+def merge_files_to_output(
+    input_paths: list[Path],
+    output_path: Path,
+    on_progress: Callable[[int], None] | None = None,
+) -> Path:
+    return engine_merge(input_paths, output_path, on_progress=on_progress)
+
+
+def images_to_pdf_files_to_output(
+    input_paths: list[Path],
+    output_path: Path,
+    on_progress: Callable[[int], None] | None = None,
+) -> Path:
+    return engine_images_to_pdf(input_paths, output_path, on_progress=on_progress)
+
+
 def extract_pages_file(input_path: Path, page_indices: list[int]) -> Path:
     output = safe_output_path(input_path, "extracted")
     return engine_extract_pages(input_path, output, page_indices)

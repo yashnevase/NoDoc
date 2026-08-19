@@ -7,7 +7,7 @@ from threading import Lock
 from typing import Any, Callable
 from uuid import uuid4
 
-from app.db import store
+from app.services.job_history_service import add_job_history
 
 
 JobCallable = Callable[[Callable[[int, str | None], None]], dict[str, Any]]
@@ -36,7 +36,7 @@ class JobManager:
         job = JobState(id=uuid4().hex, kind=kind, message=message)
         with self._lock:
             self._jobs[job.id] = job
-        store.add_job_history(job_id=job.id, kind=kind, created_at=job.created_at, status=job.status)
+        add_job_history(job_id=job.id, kind=kind, created_at=job.created_at, status=job.status)
         return job
 
     def get_job(self, job_id: str) -> JobState | None:
@@ -75,7 +75,7 @@ class JobManager:
             job.updated_at = datetime.now(timezone.utc).isoformat()
         output_path = result.get("output_path")
         output_paths = result.get("output_paths") or []
-        store.add_job_history(
+        add_job_history(
             job_id=job_id,
             kind=job.kind,
             created_at=job.created_at,
@@ -94,7 +94,7 @@ class JobManager:
             job.message = error
             job.updated_at = datetime.now(timezone.utc).isoformat()
         if job is not None:
-            store.add_job_history(job_id=job_id, kind=job.kind, created_at=job.created_at, status=job.status)
+            add_job_history(job_id=job_id, kind=job.kind, created_at=job.created_at, status=job.status)
 
     def submit(self, job_id: str, work: JobCallable) -> Future[None]:
         self.update_job(job_id, status="running", progress=1, message="Starting")
