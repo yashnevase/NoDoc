@@ -4,6 +4,7 @@ __pycache__/
 venv/
 .pytest_cache/
 .privatepdf-data/
+.privatepdf-test/
 .env
 frontend/.env
 node_modules/

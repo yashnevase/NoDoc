@@ -17,11 +17,14 @@ from engines.pdf.convert import pdf_to_images as engine_pdf_to_images
 from engines.pdf.convert import split_pdf as engine_split_pdf
 from engines.pdf.organize import add_image_watermark as engine_add_image_watermark
 from engines.pdf.organize import add_text_watermark as engine_add_text_watermark
+from engines.pdf.organize import add_page_numbers as engine_add_page_numbers
 from engines.pdf.organize import delete_pages as engine_delete_pages
 from engines.pdf.organize import extract_pages as engine_extract_pages
 from engines.pdf.organize import merge as engine_merge
 from engines.pdf.organize import reorder_pages as engine_reorder_pages
+from engines.pdf.organize import duplicate_pages as engine_duplicate_pages
 from engines.pdf.organize import repair as engine_repair
+from engines.pdf.organize import reverse_pages as engine_reverse_pages
 from engines.pdf.organize import rotate as engine_rotate
 from engines.pdf.security import password_protect as engine_password_protect
 from engines.pdf.security import inspect_signatures as engine_inspect_signatures
@@ -83,6 +86,16 @@ def reorder_pages_file(input_path: Path, page_indices: list[int]) -> Path:
     return engine_reorder_pages(input_path, output, page_indices)
 
 
+def reverse_pages_file(input_path: Path) -> Path:
+    output = safe_output_path(input_path, "reversed")
+    return engine_reverse_pages(input_path, output)
+
+
+def duplicate_pages_file(input_path: Path, page_indices: list[int]) -> Path:
+    output = safe_output_path(input_path, "duplicated")
+    return engine_duplicate_pages(input_path, output, page_indices)
+
+
 def repair_pdf_file(input_path: Path) -> Path:
     output = safe_output_path(input_path, "repaired")
     return engine_repair(input_path, output)
@@ -140,6 +153,35 @@ def add_image_watermark_file(
         angle=angle,
         opacity=opacity,
         size=size,
+        on_progress=on_progress,
+    )
+
+
+def add_page_numbers_file(
+    input_path: Path,
+    *,
+    page_indices: list[int] | None = None,
+    position: str = "bottom-right",
+    size: float = 12.0,
+    opacity: float = 0.7,
+    color: str = "#b02730",
+    prefix: str = "",
+    suffix: str = "",
+    start: int = 1,
+    on_progress: Callable[[int], None] | None = None,
+) -> Path:
+    output = safe_output_path(input_path, "numbered")
+    return engine_add_page_numbers(
+        input_path,
+        output,
+        page_indices=page_indices,
+        position=position,
+        size=size,
+        opacity=opacity,
+        color=color,
+        prefix=prefix,
+        suffix=suffix,
+        start=start,
         on_progress=on_progress,
     )
 

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import uuid
 from typing import Callable
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
@@ -10,6 +11,7 @@ from app.auth import require_token
 from app.jobs.manager import jobs
 from app.services.organize_service import (
     add_image_watermark_file,
+    add_page_numbers_file,
     add_text_watermark_file,
     cleanup_job_dir,
     create_upload_job_dir,
@@ -20,13 +22,15 @@ from app.services.organize_service import (
     password_protect_file,
     pdf_to_images_file,
     reorder_pages_file,
+    reverse_pages_file,
     repair_pdf_file,
     rotate_pdf_file,
+    duplicate_pages_file,
     inspect_signatures_file,
     safe_upload_output_path,
     split_pdf_file,
 )
-from engines.pdf.convert import render_pdf_preview
+from engines.pdf.convert import render_pdf_manifest, render_pdf_page, render_pdf_preview
 from engines.images.to_pdf import ImageEngineError
 from engines.pdf.organize import PdfEngineError
 
@@ -56,6 +60,48 @@ class MultiOutputResponse(BaseModel):
     output_paths: list[str]
 
 
+class DuplicateRequest(BaseModel):
+    input_paths: list[str]
+    pages: str
+
+    @field_validator("input_paths")
+    @classmethod
+    def non_empty(cls, v: list[str]) -> list[str]:
+        if len(v) != 1:
+            raise ValueError("duplicate-pages expects exactly one input PDF")
+        return v
+
+
+class ReverseRequest(BaseModel):
+    input_paths: list[str]
+
+    @field_validator("input_paths")
+    @classmethod
+    def non_empty(cls, v: list[str]) -> list[str]:
+        if len(v) != 1:
+            raise ValueError("reverse-pages expects exactly one input PDF")
+        return v
+
+
+class PageNumbersRequest(BaseModel):
+    input_paths: list[str]
+    pages: str = ""
+    position: str = "bottom-right"
+    size: float = 12.0
+    opacity: float = 0.7
+    color: str = "#b02730"
+    prefix: str = ""
+    suffix: str = ""
+    start: int = 1
+
+    @field_validator("input_paths")
+    @classmethod
+    def non_empty(cls, v: list[str]) -> list[str]:
+        if len(v) != 1:
+            raise ValueError("page-numbers expects exactly one input PDF")
+        return v
+
+
 class SignatureField(BaseModel):
     name: str
     signed: bool
@@ -82,6 +128,15 @@ class PreviewResponse(BaseModel):
     pages: list[PreviewPage]
 
 
+class PreviewPageResponse(BaseModel):
+    page: PreviewPage
+
+
+class PreviewManifestResponse(BaseModel):
+    preview_id: str
+    pages: list[PreviewPage]
+
+
 class JobAcceptedResponse(BaseModel):
     job_id: str
 
@@ -93,6 +148,26 @@ def enqueue_job(
     job = jobs.create_job(kind, message="Queued")
     jobs.submit(job.id, work)
     return JobAcceptedResponse(job_id=job.id)
+
+
+_preview_sessions: dict[str, Path] = {}
+
+
+def register_preview_session(path: Path) -> str:
+    preview_id = uuid.uuid4().hex
+    _preview_sessions[preview_id] = path
+    return preview_id
+
+
+def resolve_preview_session(preview_id: str | None, path: str | None) -> Path:
+    if preview_id:
+        preview_path = _preview_sessions.get(preview_id)
+        if preview_path is None:
+            raise HTTPException(status_code=404, detail="preview session not found")
+        return preview_path
+    if path:
+        return Path(path)
+    raise HTTPException(status_code=400, detail="preview_id or path is required")
 
 
 def parse_page_ranges(value: str) -> list[int]:
@@ -248,6 +323,29 @@ async def preview_pdf(req: MergeRequest) -> PreviewResponse:
     return PreviewResponse(pages=[PreviewPage(**page) for page in pages])
 
 
+@router.post("/preview-manifest", response_model=PreviewManifestResponse)
+async def preview_manifest(req: MergeRequest) -> PreviewManifestResponse:
+    if len(req.input_paths) != 1:
+        raise HTTPException(status_code=400, detail="preview-manifest expects exactly one input PDF")
+    try:
+        input_path = Path(req.input_paths[0])
+        preview_id = register_preview_session(input_path)
+        pages = render_pdf_manifest(input_path)
+    except PdfEngineError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return PreviewManifestResponse(preview_id=preview_id, pages=[PreviewPage(**page) for page in pages])
+
+
+@router.get("/preview-page", response_model=PreviewPageResponse)
+async def preview_page(preview_id: str | None = None, path: str | None = None, page: int = 1, scale: float = 0.55) -> PreviewPageResponse:
+    try:
+        preview_path = resolve_preview_session(preview_id, path)
+        preview = render_pdf_page(preview_path, page, scale=scale)
+    except PdfEngineError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return PreviewPageResponse(page=PreviewPage(**preview))
+
+
 @router.post("/extract-pages", response_model=ConvertResponse | JobAcceptedResponse)
 async def extract_pages(req: MergeRequest, pages: str = "", async_job: bool = False) -> ConvertResponse | JobAcceptedResponse:
     if len(req.input_paths) != 1:
@@ -331,6 +429,184 @@ async def reorder_pages(req: MergeRequest, order: str = "", async_job: bool = Fa
     except (PdfEngineError, IndexError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return ConvertResponse(output_path=str(output))
+
+
+@router.post("/reverse-pages", response_model=ConvertResponse | JobAcceptedResponse)
+async def reverse_pages(req: ReverseRequest, async_job: bool = False) -> ConvertResponse | JobAcceptedResponse:
+    if async_job:
+        input_path = Path(req.input_paths[0])
+        return enqueue_job(
+            "reverse_pages",
+            lambda progress: {"output_path": str(reverse_pages_file(input_path))},
+        )
+    try:
+        output = reverse_pages_file(Path(req.input_paths[0]))
+    except PdfEngineError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return ConvertResponse(output_path=str(output))
+
+
+@router.post("/duplicate-pages", response_model=ConvertResponse | JobAcceptedResponse)
+async def duplicate_pages(req: DuplicateRequest, async_job: bool = False) -> ConvertResponse | JobAcceptedResponse:
+    page_indices = parse_page_ranges(req.pages)
+    input_path = Path(req.input_paths[0])
+    if async_job:
+        return enqueue_job(
+            "duplicate_pages",
+            lambda progress: {"output_path": str(duplicate_pages_file(input_path, page_indices))},
+        )
+    try:
+        output = duplicate_pages_file(input_path, page_indices)
+    except (PdfEngineError, IndexError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return ConvertResponse(output_path=str(output))
+
+
+@router.post("/reverse-pages-upload", response_model=ConvertResponse | JobAcceptedResponse)
+async def reverse_pages_upload(files: list[UploadFile] = File(...), async_job: bool = False) -> ConvertResponse | JobAcceptedResponse:
+    if len(files) != 1:
+        raise HTTPException(status_code=400, detail="reverse-pages-upload expects exactly one PDF")
+
+    job_dir = create_upload_job_dir()
+    try:
+        upload = files[0]
+        target_path = job_dir / (upload.filename or "input.pdf")
+        target_path.write_bytes(await upload.read())
+        if async_job:
+            return enqueue_job(
+                "reverse_pages_upload",
+                lambda progress: {"output_path": str(reverse_pages_file(target_path))},
+            )
+        output = reverse_pages_file(target_path)
+        return ConvertResponse(output_path=str(output))
+    except PdfEngineError as exc:
+        cleanup_job_dir(job_dir)
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/duplicate-pages-upload", response_model=ConvertResponse | JobAcceptedResponse)
+async def duplicate_pages_upload(
+    files: list[UploadFile] = File(...),
+    pages: str = Form(...),
+    async_job: bool = False,
+) -> ConvertResponse | JobAcceptedResponse:
+    if len(files) != 1:
+        raise HTTPException(status_code=400, detail="duplicate-pages-upload expects exactly one PDF")
+
+    job_dir = create_upload_job_dir()
+    try:
+        upload = files[0]
+        target_path = job_dir / (upload.filename or "input.pdf")
+        target_path.write_bytes(await upload.read())
+        page_indices = parse_page_ranges(pages)
+        if async_job:
+            return enqueue_job(
+                "duplicate_pages_upload",
+                lambda progress: {"output_path": str(duplicate_pages_file(target_path, page_indices))},
+            )
+        output = duplicate_pages_file(target_path, page_indices)
+        return ConvertResponse(output_path=str(output))
+    except (PdfEngineError, IndexError) as exc:
+        cleanup_job_dir(job_dir)
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/page-numbers", response_model=ConvertResponse | JobAcceptedResponse)
+async def page_numbers(req: PageNumbersRequest, async_job: bool = False) -> ConvertResponse | JobAcceptedResponse:
+    page_indices = parse_page_ranges(req.pages) if req.pages.strip() else None
+    if async_job:
+        input_path = Path(req.input_paths[0])
+        return enqueue_job(
+            "page_numbers",
+            lambda progress: {
+                "output_path": str(
+                    add_page_numbers_file(
+                        input_path,
+                        page_indices=page_indices,
+                        position=req.position,
+                        size=req.size,
+                        opacity=req.opacity,
+                        color=req.color,
+                        prefix=req.prefix,
+                        suffix=req.suffix,
+                        start=req.start,
+                    )
+                )
+            },
+        )
+    try:
+        output = add_page_numbers_file(
+            Path(req.input_paths[0]),
+            page_indices=page_indices,
+            position=req.position,
+            size=req.size,
+            opacity=req.opacity,
+            color=req.color,
+            prefix=req.prefix,
+            suffix=req.suffix,
+            start=req.start,
+        )
+    except PdfEngineError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return ConvertResponse(output_path=str(output))
+
+
+@router.post("/page-numbers-upload", response_model=ConvertResponse | JobAcceptedResponse)
+async def page_numbers_upload(
+    files: list[UploadFile] = File(...),
+    pages: str = Form(""),
+    position: str = Form("bottom-right"),
+    size: float = Form(12.0),
+    opacity: float = Form(0.7),
+    color: str = Form("#b02730"),
+    prefix: str = Form(""),
+    suffix: str = Form(""),
+    start: int = Form(1),
+    async_job: bool = False,
+) -> ConvertResponse | JobAcceptedResponse:
+    if len(files) != 1:
+        raise HTTPException(status_code=400, detail="page-numbers-upload expects exactly one PDF")
+
+    job_dir = create_upload_job_dir()
+    try:
+        upload = files[0]
+        target_path = job_dir / (upload.filename or "input.pdf")
+        target_path.write_bytes(await upload.read())
+        page_indices = parse_page_ranges(pages) if pages.strip() else None
+        if async_job:
+            return enqueue_job(
+                "page_numbers_upload",
+                lambda progress: {
+                    "output_path": str(
+                        add_page_numbers_file(
+                            target_path,
+                            page_indices=page_indices,
+                            position=position,
+                            size=size,
+                            opacity=opacity,
+                            color=color,
+                            prefix=prefix,
+                            suffix=suffix,
+                            start=start,
+                        )
+                    )
+                },
+            )
+        output = add_page_numbers_file(
+            target_path,
+            page_indices=page_indices,
+            position=position,
+            size=size,
+            opacity=opacity,
+            color=color,
+            prefix=prefix,
+            suffix=suffix,
+            start=start,
+        )
+        return ConvertResponse(output_path=str(output))
+    except PdfEngineError as exc:
+        cleanup_job_dir(job_dir)
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.post("/password-protect", response_model=ConvertResponse | JobAcceptedResponse)
@@ -590,6 +866,24 @@ async def preview_pdf_upload(files: list[UploadFile] = File(...)) -> PreviewResp
         target_path.write_bytes(await upload.read())
         pages = render_pdf_preview(target_path)
         return PreviewResponse(pages=[PreviewPage(**page) for page in pages])
+    except PdfEngineError as exc:
+        cleanup_job_dir(job_dir)
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/preview-manifest-upload", response_model=PreviewManifestResponse)
+async def preview_manifest_upload(files: list[UploadFile] = File(...)) -> PreviewManifestResponse:
+    if len(files) != 1:
+        raise HTTPException(status_code=400, detail="preview-manifest-upload expects exactly one PDF")
+
+    job_dir = create_upload_job_dir()
+    try:
+        upload = files[0]
+        target_path = job_dir / (upload.filename or "input.pdf")
+        target_path.write_bytes(await upload.read())
+        preview_id = register_preview_session(target_path)
+        pages = render_pdf_manifest(target_path)
+        return PreviewManifestResponse(preview_id=preview_id, pages=[PreviewPage(**page) for page in pages])
     except PdfEngineError as exc:
         cleanup_job_dir(job_dir)
         raise HTTPException(status_code=400, detail=str(exc)) from exc

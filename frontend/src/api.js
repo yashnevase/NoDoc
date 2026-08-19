@@ -123,6 +123,42 @@ export async function checkHealth(options = {}) {
   return readJson(res);
 }
 
+export async function getRecentFiles(options = {}) {
+  const { base, token } = sidecarBase();
+  const res = await fetch(`${base}/library/recent`, {
+    headers: {
+      "x-privatepdf-token": token,
+    },
+    signal: options.signal,
+  });
+  return readJson(res);
+}
+
+export async function saveRecentFiles(names, options = {}) {
+  const { base, token } = sidecarBase();
+  const res = await fetch(`${base}/library/recent`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "x-privatepdf-token": token,
+    },
+    body: JSON.stringify({ names }),
+    signal: options.signal,
+  });
+  return readJson(res);
+}
+
+export async function getJobHistory(options = {}) {
+  const { base, token } = sidecarBase();
+  const res = await fetch(`${base}/library/history`, {
+    headers: {
+      "x-privatepdf-token": token,
+    },
+    signal: options.signal,
+  });
+  return readJson(res);
+}
+
 export async function getJobStatus(jobId, options = {}) {
   const { base, token } = sidecarBase();
   const res = await fetch(`${base}/results/jobs/${encodeURIComponent(jobId)}`, {
@@ -148,6 +184,10 @@ export function pickFolderDialog() {
 
 export function copyFileToPath(sourcePath, targetPath) {
   return desktopInvoke("copy_file_to_path", { sourcePath, targetPath });
+}
+
+export function revealPath(path) {
+  return desktopInvoke("reveal_path", { path });
 }
 
 export function mergeUploadedFiles(files, options) {
@@ -190,6 +230,34 @@ export function previewPdfPath(paths, options) {
   return postJson("/organize/preview-pdf", { input_paths: paths }, options);
 }
 
+export function previewPdfManifestUpload(files, options) {
+  return postUpload("/organize/preview-manifest-upload", files, undefined, options);
+}
+
+export function previewPdfManifestPath(paths, options) {
+  return postJson("/organize/preview-manifest", { input_paths: paths }, options);
+}
+
+export async function previewPdfPage(previewIdOrPath, page, options = {}) {
+  const { base, token } = sidecarBase();
+  const params = new URLSearchParams({ page: String(page) });
+  if (previewIdOrPath) {
+    const looksLikeFilePath =
+      /[\\/]/.test(previewIdOrPath) || /^[A-Za-z]:[\\/]/.test(previewIdOrPath);
+    params.set(looksLikeFilePath ? "path" : "preview_id", previewIdOrPath);
+  }
+  if (typeof options.scale === "number") {
+    params.set("scale", String(options.scale));
+  }
+  const res = await fetch(`${base}/organize/preview-page?${params.toString()}`, {
+    headers: {
+      "x-privatepdf-token": token,
+    },
+    signal: options.signal,
+  });
+  return readJson(res);
+}
+
 export function extractPagesUpload(files, pages, options) {
   return postUpload("/organize/extract-pages-upload", files, { pages }, options);
 }
@@ -220,6 +288,39 @@ export function reorderPagesUpload(files, order, options) {
 
 export function reorderPagesPath(paths, order, options) {
   return postJson(`/organize/reorder-pages?order=${encodeURIComponent(order)}`, { input_paths: paths }, options);
+}
+
+export function reversePagesUpload(files, options) {
+  return postUpload("/organize/reverse-pages-upload", files, undefined, options);
+}
+
+export function reversePagesPath(paths, options) {
+  return postJson("/organize/reverse-pages", { input_paths: paths }, options);
+}
+
+export function duplicatePagesUpload(files, pages, options) {
+  return postUpload("/organize/duplicate-pages-upload", files, { pages }, options);
+}
+
+export function duplicatePagesPath(paths, pages, options) {
+  return postJson(`/organize/duplicate-pages?pages=${encodeURIComponent(pages)}`, { input_paths: paths }, options);
+}
+
+export function pageNumbersUpload(files, payload, options) {
+  return postUpload("/organize/page-numbers-upload", files, payload, options);
+}
+
+export function pageNumbersPath(paths, payload, options) {
+  const params = new URLSearchParams();
+  params.set("pages", payload.pages || "");
+  params.set("position", payload.position || "bottom-right");
+  params.set("size", String(payload.size ?? 12));
+  params.set("opacity", String(payload.opacity ?? 0.7));
+  params.set("color", payload.color || "#b02730");
+  params.set("prefix", payload.prefix || "");
+  params.set("suffix", payload.suffix || "");
+  params.set("start", String(payload.start ?? 1));
+  return postJson(`/organize/page-numbers?${params.toString()}`, { input_paths: paths }, options);
 }
 
 export function passwordProtectUpload(files, password, options) {

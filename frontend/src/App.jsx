@@ -10,6 +10,8 @@ import {
   extractPagesPath,
   extractPagesUpload,
   getJobStatus,
+  getJobHistory,
+  getRecentFiles,
   imagesToPdfPaths,
   imagesToPdfUpload,
   mergePathFiles,
@@ -21,18 +23,29 @@ import {
   pickFilesDialog,
   pickFolderDialog,
   pickSavePathDialog,
+  previewPdfManifestPath,
+  previewPdfManifestUpload,
+  previewPdfPage,
   previewPdfPath,
   previewPdfUpload,
   reorderPagesPath,
   reorderPagesUpload,
+  reversePagesPath,
+  reversePagesUpload,
+  duplicatePagesPath,
+  duplicatePagesUpload,
+  pageNumbersPath,
+  pageNumbersUpload,
   repairPdfPath,
   repairPdfUpload,
+  revealPath,
   rotatePdfPath,
   rotatePdfUpload,
   signatureReportPath,
   signatureReportUpload,
   splitPdfPath,
   splitPdfUpload,
+  saveRecentFiles,
   watermarkImagePath,
   watermarkImageUpload,
   watermarkTextPath,
@@ -67,6 +80,8 @@ const groups = [
       { id: "delete", icon: "trash", title: "Delete", detail: "Remove picked pages", needs: "Pick pages", status: "ready" },
       { id: "rotate", icon: "rotate", title: "Rotate", detail: "Rotate all or picked pages", needs: "1 PDF", status: "ready" },
       { id: "reorder", icon: "reorder", title: "Reorder", detail: "Drag pages into order", needs: "Drag pages", status: "ready" },
+      { id: "reverse", icon: "reorder", title: "Reverse", detail: "Flip the page order", needs: "1 PDF", status: "ready" },
+      { id: "duplicate", icon: "copy", title: "Duplicate", detail: "Duplicate picked pages", needs: "Pick pages", status: "ready" },
       { id: "batch", icon: "batch", title: "Batch", detail: "Run tools on many files", needs: "Later", status: "planned" },
     ],
   },
@@ -75,6 +90,7 @@ const groups = [
     label: "Edit",
     tools: [
       { id: "watermark", icon: "stamp", title: "Watermark", detail: "Text, badge, or image mark", needs: "1 PDF", status: "ready" },
+      { id: "page_numbers", icon: "menu", title: "Page Numbers", detail: "Stamp page numbers", needs: "1 PDF", status: "ready" },
       { id: "text", icon: "text", title: "Text", detail: "Place text on page", needs: "Later", status: "planned" },
       { id: "draw", icon: "draw", title: "Draw", detail: "Ink and shapes", needs: "Later", status: "planned" },
       { id: "highlight", icon: "highlight", title: "Highlight", detail: "Mark page areas", needs: "Later", status: "planned" },
@@ -115,7 +131,7 @@ const groups = [
 
 const readyToolIds = new Set(groups.flatMap((group) => group.tools.filter((tool) => tool.status === "ready").map((tool) => tool.id)));
 const quickWatermarkAngles = [0, 90, 180, 270];
-const asyncToolIds = new Set(["merge", "images", "split", "render", "extract", "delete", "rotate", "reorder", "password", "repair", "watermark"]);
+const asyncToolIds = new Set(["merge", "images", "split", "render", "extract", "delete", "rotate", "reorder", "reverse", "duplicate", "password", "repair", "watermark", "page_numbers"]);
 
 function Icon({ name }) {
   const common = {
@@ -152,11 +168,14 @@ function Icon({ name }) {
     repair: <><path d="M14 5l5 5-9 9H5v-5z" /><path d="M12 7l5 5" /></>,
     compare: <><path d="M5 5h7v14H5z" /><path d="M12 8h7v11h-7" /></>,
     archive: <><path d="M5 7h14v13H5z" /><path d="M4 4h16v3H4z" /><path d="M10 11h4" /></>,
+    folder: <><path d="M3.5 7.5h6l2 2h9v8a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2z" /><path d="M3.5 7.5v-1a2 2 0 0 1 2-2h3l2 2h8a2 2 0 0 1 2 2v1" /></>,
+    openExternal: <><path d="M14 5h5v5" /><path d="M10 14 19 5" /><path d="M19 13v4a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h4" /></>,
     upload: <><path d="M12 17V5" /><path d="M7 10l5-5 5 5" /><path d="M5 19h14" /></>,
     download: <><path d="M12 5v12" /><path d="M7 12l5 5 5-5" /><path d="M5 19h14" /></>,
     close: <><path d="M6 6l12 12" /><path d="M18 6L6 18" /></>,
     reload: <><path d="M19 8a7 7 0 1 0 1 6" /><path d="M19 4v4h-4" /></>,
     check: <><path d="M5 12l4 4L19 6" /></>,
+    copy: <><path d="M8 8h10v11H8z" /><path d="M6 5h10v3" /></>,
     settings: <><path d="M12 8.5a3.5 3.5 0 1 0 0 7a3.5 3.5 0 0 0 0-7z" /><path d="M19 12l2-1-1-3-2 .2-.9-1.6 1.2-1.7-2.2-2.2-1.7 1.2-1.6-.9.2-2-3-1-1 2h-1.8l-1-2-3 1 .2 2-1.6.9-1.7-1.2-2.2 2.2 1.2 1.7-.9 1.6-2-.2-1 3 2 1v1.8l-2 1 1 3 2-.2.9 1.6-1.2 1.7 2.2 2.2 1.7-1.2 1.6.9-.2 2 3 1 1-2h1.8l1 2 3-1-.2-2 1.6-.9 1.7 1.2 2.2-2.2-1.2-1.7.9-1.6 2 .2 1-3-2-1z" /></>,
     menu: <><path d="M4 7h16" /><path d="M4 12h16" /><path d="M4 17h16" /></>,
     history: <><path d="M12 7v5l3 2" /><path d="M5 12a7 7 0 1 0 2-4.9" /><path d="M5 4v4h4" /></>,
@@ -242,6 +261,12 @@ function pathItems(paths) {
   return paths.map((path) => ({ source: "path", path, name: pathName(path) }));
 }
 
+function pathFolder(path) {
+  const normalized = String(path || "").replace(/\//g, "\\");
+  const lastSeparator = normalized.lastIndexOf("\\");
+  return lastSeparator >= 0 ? normalized.slice(0, lastSeparator) : normalized;
+}
+
 function transferHasFiles(dataTransfer) {
   if (!dataTransfer) {
     return false;
@@ -251,6 +276,13 @@ function transferHasFiles(dataTransfer) {
     return items.some((item) => item.kind === "file");
   }
   return Array.from(dataTransfer.files || []).length > 0;
+}
+
+function transferHasInternalPageDrag(dataTransfer) {
+  if (!dataTransfer) {
+    return false;
+  }
+  return Array.from(dataTransfer.types || []).includes("application/x-nodoc-page");
 }
 
 function formatTime(timestamp) {
@@ -273,6 +305,35 @@ function clamp(value, low, high) {
 function normalizeAngle(angle) {
   const value = angle % 360;
   return value < 0 ? value + 360 : value;
+}
+
+function LazyThumbImage({ previewSessionId, pageNumber, fallbackImage, altText, rootRef }) {
+  const thumbRef = useRef(null);
+  const [image, setImage] = useState(fallbackImage || "");
+
+  useEffect(() => {
+    setImage(fallbackImage || "");
+  }, [fallbackImage, pageNumber]);
+
+  useEffect(() => {
+    if (!previewSessionId || image) {
+      return undefined;
+    }
+
+    let mounted = true;
+    void previewPdfPage(previewSessionId, pageNumber, { scale: 0.55 })
+      .then((response) => {
+        if (mounted) {
+          setImage(response.page.image || "");
+        }
+      })
+      .catch(() => {});
+    return () => {
+      mounted = false;
+    };
+  }, [image, pageNumber, previewSessionId]);
+
+  return <img ref={thumbRef} src={image || "about:blank"} alt={altText} draggable="false" style={{ visibility: image ? "visible" : "hidden" }} />;
 }
 
 export default function App() {
@@ -304,6 +365,7 @@ export default function App() {
   const [busyLabel, setBusyLabel] = useState("");
   const [busyProgress, setBusyProgress] = useState(null);
   const [previewBusy, setPreviewBusy] = useState(false);
+  const [previewSessionId, setPreviewSessionId] = useState("");
   const [pageDragMode, setPageDragMode] = useState(null);
   const [reorderDragPage, setReorderDragPage] = useState(null);
   const [showSettings, setShowSettings] = useState(false);
@@ -311,12 +373,14 @@ export default function App() {
   const [recentFiles, setRecentFiles] = useState([]);
   const [outputFolder, setOutputFolder] = useState("");
   const [previewTick, setPreviewTick] = useState(0);
+  const [previewViewport, setPreviewViewport] = useState({ height: 0, width: 0, scrollTop: 0 });
   const fileInputRef = useRef(null);
   const watermarkImageInputRef = useRef(null);
   const dragDepthRef = useRef(0);
   const internalDragRef = useRef(false);
   const watermarkDialRef = useRef(null);
   const watermarkDialDragRef = useRef(false);
+  const previewScrollRef = useRef(null);
   const previewAbortRef = useRef(null);
   const signatureAbortRef = useRef(null);
   const actionAbortRef = useRef(null);
@@ -338,12 +402,34 @@ export default function App() {
   const previewSourceKey = fileItems.map((item) => item.source === "path" ? `p:${item.path}` : `u:${item.name}:${item.file.size}:${item.file.lastModified}`).join("|");
   const resultPaths = result?.paths || [];
   const previewPage = pagePreview[0];
+  const previewPageNumber = previewPage?.page || 1;
   const previewPageLabel = previewPage
     ? `${Math.round(previewPage.width)} x ${Math.round(previewPage.height)} pt`
     : "Page preview";
   const previewPaperStyle = previewPage
-    ? { aspectRatio: `${Math.max(1, previewPage.width)} / ${Math.max(1, previewPage.height)}` }
+    ? {
+        aspectRatio: `${Math.max(1, previewPage.width)} / ${Math.max(1, previewPage.height)}`,
+        maxHeight: "min(34vh, 280px)",
+      }
     : undefined;
+  const pageGridItemHeight = 208;
+  const pageGridGap = 14;
+  const pageGridMinWidth = 132;
+  const pageGridColumns = previewViewport.width
+    ? Math.max(1, Math.floor((previewViewport.width + pageGridGap) / (pageGridMinWidth + pageGridGap)))
+    : 1;
+  const pageGridRowCount = Math.ceil(pagePreview.length / pageGridColumns);
+  const visibleStartRow = previewViewport.height
+    ? Math.max(0, Math.floor(previewViewport.scrollTop / pageGridItemHeight) - 2)
+    : 0;
+  const visibleEndRow = previewViewport.height
+    ? Math.min(pageGridRowCount, Math.ceil((previewViewport.scrollTop + previewViewport.height) / pageGridItemHeight) + 2)
+    : pageGridRowCount;
+  const visibleStartIndex = visibleStartRow * pageGridColumns;
+  const visibleEndIndex = Math.min(pagePreview.length, visibleEndRow * pageGridColumns);
+  const visiblePages = pagePreview.slice(visibleStartIndex, visibleEndIndex);
+  const topSpacerHeight = visibleStartRow * pageGridItemHeight;
+  const bottomSpacerHeight = Math.max(0, (pageGridRowCount - visibleEndRow) * pageGridItemHeight);
   const watermarkPlacementStyle = watermarkPosition === "top-left"
     ? { left: "24%", top: "22%" }
     : watermarkPosition === "top-right"
@@ -355,7 +441,7 @@ export default function App() {
           : { left: "50%", top: "50%" };
   const isBusy = Boolean(busyLabel);
   const showCancelAction = isBusy || previewBusy;
-  const pageToolActive = ["extract", "delete", "rotate", "watermark"].includes(activeTool);
+  const pageToolActive = ["extract", "delete", "rotate", "watermark", "duplicate"].includes(activeTool);
   const reorderActive = activeTool === "reorder";
   const watermarkAllPages = activeTool === "watermark" && watermarkScope === "all";
   const reorderChanged = pagePreview.length > 0 && pagePreview.some((page, index) => page.page !== index + 1);
@@ -396,6 +482,7 @@ export default function App() {
     previewAbortRef.current?.abort();
     setSelectedPages([]);
     setPagePreview([]);
+    setPreviewSessionId("");
 
     async function loadPreview() {
       if (!exactlyOnePdfSelected || mixedSources) {
@@ -407,10 +494,11 @@ export default function App() {
       setPreviewBusy(true);
       try {
         const response = hasPaths
-          ? await previewPdfPath(pathInputs, { signal: controller.signal })
-          : await previewPdfUpload(uploadedFiles, { signal: controller.signal });
+          ? await previewPdfManifestPath(pathInputs, { signal: controller.signal })
+          : await previewPdfManifestUpload(uploadedFiles, { signal: controller.signal });
         if (isCurrent) {
           setPagePreview(response.pages);
+          setPreviewSessionId(response.preview_id || "");
           setStatus(`Loaded ${response.pages.length} page preview${response.pages.length === 1 ? "" : "s"}`);
         }
       } catch (err) {
@@ -439,6 +527,36 @@ export default function App() {
       previewAbortRef.current?.abort();
     };
   }, [exactlyOnePdfSelected, hasPaths, mixedSources, previewTick, previewSourceKey]);
+
+  useEffect(() => {
+    const viewport = previewScrollRef.current;
+    if (!viewport) {
+      return undefined;
+    }
+
+    const updateViewport = () => {
+      setPreviewViewport({
+        height: viewport.clientHeight,
+        width: viewport.clientWidth,
+        scrollTop: viewport.scrollTop,
+      });
+    };
+
+    updateViewport();
+    viewport.addEventListener("scroll", updateViewport, { passive: true });
+    const resizeObserver = new ResizeObserver(updateViewport);
+    resizeObserver.observe(viewport);
+    return () => {
+      viewport.removeEventListener("scroll", updateViewport);
+      resizeObserver.disconnect();
+    };
+  }, [exactlyOnePdfSelected, pagePreview.length, activeTool]);
+
+  useEffect(() => {
+    if (previewScrollRef.current) {
+      previewScrollRef.current.scrollTop = 0;
+    }
+  }, [activeTool, pagePreview.length, previewBusy]);
 
   useEffect(() => {
     let isCurrent = true;
@@ -545,7 +663,7 @@ export default function App() {
 
   useEffect(() => {
     function handleWindowDragEnter(event) {
-      if (internalDragRef.current) {
+      if (internalDragRef.current || transferHasInternalPageDrag(event.dataTransfer)) {
         event.preventDefault();
         return;
       }
@@ -558,7 +676,7 @@ export default function App() {
     }
 
     function handleWindowDragOver(event) {
-      if (internalDragRef.current) {
+      if (internalDragRef.current || transferHasInternalPageDrag(event.dataTransfer)) {
         event.preventDefault();
         return;
       }
@@ -570,7 +688,7 @@ export default function App() {
     }
 
     function handleWindowDragLeave(event) {
-      if (internalDragRef.current) {
+      if (internalDragRef.current || transferHasInternalPageDrag(event.dataTransfer)) {
         event.preventDefault();
         return;
       }
@@ -585,7 +703,7 @@ export default function App() {
     }
 
     function handleWindowDrop(event) {
-      if (internalDragRef.current) {
+      if (internalDragRef.current || transferHasInternalPageDrag(event.dataTransfer)) {
         event.preventDefault();
         internalDragRef.current = false;
         dragDepthRef.current = 0;
@@ -618,59 +736,89 @@ export default function App() {
 
   useEffect(() => {
     const savedPreferences = window.localStorage.getItem(settingsKey);
-    if (!savedPreferences) {
-      setJobHistory(readStoredList(historyKey));
-      setRecentFiles(readStoredList(recentFilesKey));
-      setOutputFolder(window.localStorage.getItem(outputFolderKey) || "");
-      return;
+    if (savedPreferences) {
+      try {
+        const preferences = JSON.parse(savedPreferences);
+        if (preferences.activeGroup && groups.some((group) => group.id === preferences.activeGroup)) {
+          setActiveGroup(preferences.activeGroup);
+          const savedGroup = groups.find((group) => group.id === preferences.activeGroup);
+          const savedTool = savedGroup?.tools.find((tool) => tool.id === preferences.activeTool);
+          const fallbackTool = savedGroup?.tools.find((tool) => tool.status === "ready")?.id || savedGroup?.tools[0]?.id || "render";
+          setActiveTool(savedTool?.id || fallbackTool);
+        }
+        if ([0, 90, 180, 270].includes(preferences.rotation)) {
+          setRotation(preferences.rotation);
+        }
+        if (["selected", "all"].includes(preferences.rotateScope)) {
+          setRotateScope(preferences.rotateScope);
+        }
+        if (["selected", "all"].includes(preferences.watermarkScope)) {
+          setWatermarkScope(preferences.watermarkScope);
+        }
+        if (["text", "badge", "image"].includes(preferences.watermarkMode)) {
+          setWatermarkMode(preferences.watermarkMode);
+        }
+        if (["verified", "question"].includes(preferences.watermarkPreset)) {
+          setWatermarkPreset(preferences.watermarkPreset);
+        }
+        if (["center", "top-left", "top-right", "bottom-left", "bottom-right"].includes(preferences.watermarkPosition)) {
+          setWatermarkPosition(preferences.watermarkPosition);
+        }
+        if (typeof preferences.watermarkAngle === "number") {
+          setWatermarkAngle(preferences.watermarkAngle);
+        }
+        if (typeof preferences.watermarkSize === "number") {
+          setWatermarkSize(preferences.watermarkSize);
+        }
+        if (typeof preferences.watermarkOpacity === "number") {
+          setWatermarkOpacity(preferences.watermarkOpacity);
+        }
+        if (typeof preferences.watermarkColor === "string") {
+          setWatermarkColor(preferences.watermarkColor);
+        }
+      } catch {
+        window.localStorage.removeItem(settingsKey);
+      }
     }
 
-    try {
-      const preferences = JSON.parse(savedPreferences);
-      if (preferences.activeGroup && groups.some((group) => group.id === preferences.activeGroup)) {
-        setActiveGroup(preferences.activeGroup);
-        const savedGroup = groups.find((group) => group.id === preferences.activeGroup);
-        const savedTool = savedGroup?.tools.find((tool) => tool.id === preferences.activeTool);
-        const fallbackTool = savedGroup?.tools.find((tool) => tool.status === "ready")?.id || savedGroup?.tools[0]?.id || "render";
-        setActiveTool(savedTool?.id || fallbackTool);
-      }
-      if ([0, 90, 180, 270].includes(preferences.rotation)) {
-        setRotation(preferences.rotation);
-      }
-      if (["selected", "all"].includes(preferences.rotateScope)) {
-        setRotateScope(preferences.rotateScope);
-      }
-      if (["selected", "all"].includes(preferences.watermarkScope)) {
-        setWatermarkScope(preferences.watermarkScope);
-      }
-      if (["text", "badge", "image"].includes(preferences.watermarkMode)) {
-        setWatermarkMode(preferences.watermarkMode);
-      }
-      if (["verified", "question"].includes(preferences.watermarkPreset)) {
-        setWatermarkPreset(preferences.watermarkPreset);
-      }
-      if (["center", "top-left", "top-right", "bottom-left", "bottom-right"].includes(preferences.watermarkPosition)) {
-        setWatermarkPosition(preferences.watermarkPosition);
-      }
-      if (typeof preferences.watermarkAngle === "number") {
-        setWatermarkAngle(preferences.watermarkAngle);
-      }
-      if (typeof preferences.watermarkSize === "number") {
-        setWatermarkSize(preferences.watermarkSize);
-      }
-      if (typeof preferences.watermarkOpacity === "number") {
-        setWatermarkOpacity(preferences.watermarkOpacity);
-      }
-      if (typeof preferences.watermarkColor === "string") {
-        setWatermarkColor(preferences.watermarkColor);
-      }
-    } catch {
-      window.localStorage.removeItem(settingsKey);
-    }
-
-    setJobHistory(readStoredList(historyKey));
-    setRecentFiles(readStoredList(recentFilesKey));
     setOutputFolder(window.localStorage.getItem(outputFolderKey) || "");
+  }, []);
+
+  useEffect(() => {
+    async function loadPersistentState() {
+      if (!canUseDesktopBridge()) {
+        setJobHistory(readStoredList(historyKey));
+        setRecentFiles(readStoredList(recentFilesKey));
+        return;
+      }
+
+      try {
+        const [historyResponse, recentResponse] = await Promise.all([getJobHistory(), getRecentFiles()]);
+        setJobHistory((historyResponse.items || []).map((item) => ({
+          id: item.id,
+          createdAt: Date.parse(item.created_at) || Date.now(),
+          tool: groups.flatMap((group) => group.tools).find((tool) => tool.id === item.kind)?.title || item.kind,
+          paths: item.output_path ? [item.output_path] : [],
+          outputs: item.output_path ? [pathName(item.output_path)] : [],
+          count: item.output_path ? 1 : 0,
+        })));
+        setRecentFiles(recentResponse.names || []);
+      } catch {
+        setJobHistory(readStoredList(historyKey));
+        setRecentFiles(readStoredList(recentFilesKey));
+      }
+    }
+
+    void loadPersistentState();
+
+    function handleReady() {
+      void loadPersistentState();
+    }
+
+    window.addEventListener("nodoc-ready", handleReady);
+    return () => {
+      window.removeEventListener("nodoc-ready", handleReady);
+    };
   }, []);
 
   useEffect(() => {
@@ -718,16 +866,35 @@ export default function App() {
       clearFiles();
     }
 
+    function handleMenuOutputFolder() {
+      void chooseOutputFolder();
+    }
+
+    function handleMenuCancel() {
+      cancelCurrentWork();
+    }
+
+    function handleMenuSettings() {
+      setShowSettings(true);
+    }
+
     function handleMenuAbout() {
       setStatus("NoDoc is a local-first desktop PDF workspace.");
+      setShowSettings(true);
     }
 
     window.addEventListener("nodoc-open-files", handleMenuOpen);
+    window.addEventListener("nodoc-choose-output-folder", handleMenuOutputFolder);
     window.addEventListener("nodoc-clear-files", handleMenuClear);
+    window.addEventListener("nodoc-cancel-task", handleMenuCancel);
+    window.addEventListener("nodoc-open-settings", handleMenuSettings);
     window.addEventListener("nodoc-about", handleMenuAbout);
     return () => {
       window.removeEventListener("nodoc-open-files", handleMenuOpen);
+      window.removeEventListener("nodoc-choose-output-folder", handleMenuOutputFolder);
       window.removeEventListener("nodoc-clear-files", handleMenuClear);
+      window.removeEventListener("nodoc-cancel-task", handleMenuCancel);
+      window.removeEventListener("nodoc-open-settings", handleMenuSettings);
       window.removeEventListener("nodoc-about", handleMenuAbout);
     };
   }, []);
@@ -738,7 +905,13 @@ export default function App() {
     }
     setRecentFiles((current) => {
       const merged = [...names, ...current].filter(Boolean);
-      return [...new Set(merged)].slice(0, 10);
+      const next = [...new Set(merged)].slice(0, 10);
+      if (canUseDesktopBridge()) {
+        void saveRecentFiles(next).catch(() => {});
+      } else {
+        window.localStorage.setItem(recentFilesKey, JSON.stringify(next));
+      }
+      return next;
     });
   }
 
@@ -752,7 +925,33 @@ export default function App() {
       outputs: paths.map((path) => pathName(path)),
       count: paths.length,
     };
-    setJobHistory((current) => [entry, ...current].slice(0, 12));
+    setJobHistory((current) => {
+      const next = [entry, ...current].slice(0, 12);
+      if (!canUseDesktopBridge()) {
+        window.localStorage.setItem(historyKey, JSON.stringify(next));
+      }
+      return next;
+    });
+  }
+
+  function loadPathItems(paths, statusMessage) {
+    const cleanPaths = (paths || []).filter(Boolean);
+    if (!cleanPaths.length) {
+      setStatus("No files available for that action.");
+      return;
+    }
+    const nextItems = pathItems(cleanPaths);
+    setFileItems(nextItems);
+    setResult(null);
+    setSelectedPages([]);
+    setPagePreview([]);
+    setPreviewSessionId("");
+    setSignatureReport(null);
+    setSignatureBusy(false);
+    setReorderDragPage(null);
+    setPreviewTick((value) => value + 1);
+    rememberRecentFiles(nextItems.map((item) => item.name));
+    setStatus(statusMessage || `Loaded ${nextItems.length} file${nextItems.length === 1 ? "" : "s"}`);
   }
 
   function updateFiles(files) {
@@ -805,12 +1004,32 @@ export default function App() {
     setResult(null);
     setSelectedPages([]);
     setPagePreview([]);
+    setPreviewSessionId("");
     setSignatureReport(null);
     setSignatureBusy(false);
     setBusyLabel("");
     setPreviewBusy(false);
     setReorderDragPage(null);
     setStatus("Workspace cleared");
+  }
+
+  async function handleRevealPath(path) {
+    if (!path) {
+      setStatus("No path available to reveal.");
+      return;
+    }
+    if (!canUseDesktopBridge()) {
+      setStatus("Reveal in folder works in the desktop app.");
+      return;
+    }
+    await withBusy("Opening folder...", async () => {
+      try {
+        await revealPath(path);
+        setStatus("Opened containing folder");
+      } catch (err) {
+        setStatus(`Folder open error: ${err.message}`);
+      }
+    });
   }
 
   function reloadPreview() {
@@ -839,7 +1058,7 @@ export default function App() {
     if (tool.id !== "digital_sign") {
       setSignatureReport(null);
     }
-    if (!["extract", "delete", "rotate", "watermark"].includes(tool.id)) {
+    if (!["extract", "delete", "rotate", "watermark", "duplicate", "page_numbers"].includes(tool.id)) {
       setSelectedPages([]);
     }
     if (tool.status !== "ready") {
@@ -885,7 +1104,7 @@ export default function App() {
   }
 
   function beginPageDragSelection(pageNumber, event) {
-    if (!pageToolActive || rotateAppliesToAll || event.button !== 0) {
+    if (!pageToolActive || rotateAppliesToAll || reorderActive || event.button !== 0) {
       return;
     }
     event.preventDefault();
@@ -895,7 +1114,7 @@ export default function App() {
   }
 
   function continuePageDragSelection(pageNumber, event) {
-    if (pageDragMode === null || event.buttons !== 1) {
+    if (reorderActive || pageDragMode === null || event.buttons !== 1) {
       return;
     }
     setPageSelection(pageNumber, pageDragMode);
@@ -978,10 +1197,10 @@ export default function App() {
     if (activeTool === "images" && !allSelectedAreImages) {
       return "Select one or more image files.";
     }
-    if (["split", "render", "extract", "delete", "rotate", "reorder", "password", "repair", "watermark", "digital_sign"].includes(activeTool) && !exactlyOnePdfSelected) {
+    if (["split", "render", "extract", "delete", "rotate", "reorder", "password", "repair", "watermark", "digital_sign", "page_numbers"].includes(activeTool) && !exactlyOnePdfSelected) {
       return "Select exactly one PDF file.";
     }
-    if (["extract", "delete"].includes(activeTool) && selectedPages.length === 0) {
+    if (["extract", "delete", "duplicate"].includes(activeTool) && selectedPages.length === 0) {
       return "Pick pages from the preview.";
     }
     if (activeTool === "rotate" && rotateScope === "selected" && selectedPages.length === 0) {
@@ -1121,6 +1340,26 @@ export default function App() {
         } else if (activeTool === "reorder") {
           const pageOrder = pagePreview.map((page) => page.page).join(",");
           response = hasPaths ? await reorderPagesPath(pathInputs, pageOrder, requestOptions) : await reorderPagesUpload(uploadedFiles, pageOrder, requestOptions);
+        } else if (activeTool === "reverse") {
+          response = hasPaths ? await reversePagesPath(pathInputs, requestOptions) : await reversePagesUpload(uploadedFiles, requestOptions);
+        } else if (activeTool === "duplicate") {
+          const duplicatePages = pagesToRange(selectedPages);
+          response = hasPaths ? await duplicatePagesPath(pathInputs, duplicatePages, requestOptions) : await duplicatePagesUpload(uploadedFiles, duplicatePages, requestOptions);
+        } else if (activeTool === "page_numbers") {
+          const numberPages = selectedPages.length ? pagesToRange(selectedPages) : "";
+          const numberPayload = {
+            pages: numberPages,
+            position: "bottom-right",
+            size: 12,
+            opacity: 0.72,
+            color: "#b02730",
+            prefix: "",
+            suffix: "",
+            start: 1,
+          };
+          response = hasPaths
+            ? await pageNumbersPath(pathInputs, numberPayload, requestOptions)
+            : await pageNumbersUpload(uploadedFiles, numberPayload, requestOptions);
         } else if (activeTool === "password") {
           response = hasPaths ? await passwordProtectPath(pathInputs, password, requestOptions) : await passwordProtectUpload(uploadedFiles, password, requestOptions);
         } else if (activeTool === "repair") {
@@ -1305,6 +1544,10 @@ export default function App() {
                         <em>{formatTime(entry.createdAt)}</em>
                       </div>
                       <div className="settings-list-actions">
+                        <button type="button" onClick={() => loadPathItems(entry.paths || [], "Loaded result into workspace")} disabled={isBusy || !entry.paths?.length}>
+                          <Icon name="openExternal" />
+                          <span>Use</span>
+                        </button>
                         {entry.paths?.length === 1 ? (
                           <button type="button" onClick={() => handleDownloadOne(entry.paths[0])} disabled={isBusy}>
                             <Icon name="download" />
@@ -1320,6 +1563,12 @@ export default function App() {
                           <button type="button" onClick={() => void exportResultsToFolder(entry.paths)} disabled={isBusy}>
                             <Icon name="folder" />
                             <span>Export</span>
+                          </button>
+                        ) : null}
+                        {canUseDesktopBridge() && entry.paths?.length ? (
+                          <button type="button" onClick={() => void handleRevealPath(entry.paths[0])} disabled={isBusy}>
+                            <Icon name="openExternal" />
+                            <span>Show</span>
                           </button>
                         ) : null}
                       </div>
@@ -1438,6 +1687,16 @@ export default function App() {
                   <button type="button" onClick={() => void exportResultsToFolder()} disabled={isBusy}>
                     <Icon name="folder" />
                     <span>Export</span>
+                  </button>
+                ) : null}
+                <button type="button" onClick={() => loadPathItems(resultPaths, "Loaded result into workspace")} disabled={isBusy}>
+                  <Icon name="openExternal" />
+                  <span>Use result</span>
+                </button>
+                {canUseDesktopBridge() ? (
+                  <button type="button" onClick={() => void handleRevealPath(resultPaths[0] || outputFolder || pathFolder(resultPaths[0] || ""))} disabled={isBusy}>
+                    <Icon name="folder" />
+                    <span>Show folder</span>
                   </button>
                 ) : null}
                 <span>{resultPaths.slice(0, 3).map((path) => pathName(path)).join(", ")}</span>
@@ -1732,12 +1991,13 @@ export default function App() {
                     <div className="watermark-preview-shell">
                       <div className="watermark-preview-page" style={previewPaperStyle}>
                         <div className="watermark-preview-size">{previewPageLabel}</div>
-                        {previewPage?.image ? (
-                          <img
-                            className="watermark-preview-image"
-                            src={previewPage.image}
-                            alt="Selected PDF page preview"
-                            draggable="false"
+                        {previewPage ? (
+                          <LazyThumbImage
+                            previewSessionId={previewSessionId}
+                            pageNumber={previewPageNumber}
+                            fallbackImage={previewPage.image}
+                            altText="Selected PDF page preview"
+                            rootRef={previewScrollRef}
                           />
                         ) : (
                           <div className="watermark-preview-empty">Preview</div>
@@ -2032,95 +2292,107 @@ export default function App() {
                   <p>Rendering preview</p>
                 </div>
               ) : (
-                <div className={`page-grid preview-${activeTool}`}>
-                  {pagePreview.map((page) => {
-                    const selected = selectedPages.includes(page.page);
-                    const rotationApplies = rotateAppliesToAll || selected;
-                    return (
-                      <button
-                        className={`page-thumb ${pageActionClass(activeTool, selected, rotationApplies)} ${reorderDragPage === page.page ? "is-dragging-page" : ""}`}
-                        key={page.page}
-                        style={
-                          activeTool === "rotate" && rotationApplies
-                            ? {
-                                "--preview-rotation": `${rotation}deg`,
-                                "--preview-scale": rotation === 0 ? "1" : rotation === 180 ? "0.92" : "0.78",
+                <div className="page-grid-viewport" ref={previewScrollRef}>
+                  <div className={`page-grid preview-${activeTool}`}>
+                    <div className="page-grid-spacer" aria-hidden="true" style={{ height: `${topSpacerHeight}px` }} />
+                    {visiblePages.map((page, index) => {
+                      const selected = selectedPages.includes(page.page);
+                      const rotationApplies = rotateAppliesToAll || selected;
+                      return (
+                        <button
+                          className={`page-thumb ${pageActionClass(activeTool, selected, rotationApplies)} ${reorderDragPage === page.page ? "is-dragging-page" : ""}`}
+                          key={page.page}
+                          style={
+                            activeTool === "rotate" && rotationApplies
+                              ? {
+                                  "--preview-rotation": `${rotation}deg`,
+                                  "--preview-scale": rotation === 0 ? "1" : rotation === 180 ? "0.92" : "0.78",
+                                }
+                              : undefined
+                          }
+                          type="button"
+                          title={reorderActive ? "Drag to reorder pages" : pageToolActive ? "Drag across pages to multi-select" : `Page ${page.page}`}
+                          draggable={reorderActive && !isBusy}
+                          onDragStart={(event) => {
+                            if (!reorderActive) {
+                              return;
+                            }
+                            event.stopPropagation();
+                            internalDragRef.current = true;
+                            dragDepthRef.current = 0;
+                            setDropOverlayActive(false);
+                            setReorderDragPage(page.page);
+                            event.dataTransfer.effectAllowed = "move";
+                            event.dataTransfer.setData("application/x-nodoc-page", String(page.page));
+                          }}
+                          onDragOver={(event) => {
+                            if (!reorderActive || isBusy) {
+                              return;
+                            }
+                            event.preventDefault();
+                            event.stopPropagation();
+                            event.dataTransfer.dropEffect = "move";
+                          }}
+                          onDrop={(event) => {
+                            if (!reorderActive || isBusy) {
+                              return;
+                            }
+                            event.preventDefault();
+                            event.stopPropagation();
+                            const draggedPage = Number(event.dataTransfer.getData("application/x-nodoc-page") || reorderDragPage);
+                            movePreviewPage(draggedPage, page.page);
+                            internalDragRef.current = false;
+                            setReorderDragPage(null);
+                          }}
+                          onDragEnd={(event) => {
+                            event.stopPropagation();
+                            internalDragRef.current = false;
+                            dragDepthRef.current = 0;
+                            setDropOverlayActive(false);
+                            setReorderDragPage(null);
+                          }}
+                          onPointerDown={(event) => beginPageDragSelection(page.page, event)}
+                          onPointerEnter={(event) => continuePageDragSelection(page.page, event)}
+                          onPointerUp={endPageDragSelection}
+                          onPointerCancel={endPageDragSelection}
+                          onClick={(event) => {
+                            if (reorderActive) {
+                              event.preventDefault();
+                              return;
+                            }
+                            if (!pageToolActive || rotateAppliesToAll) {
+                              event.preventDefault();
+                              if (pageToolActive && !rotateAppliesToAll) {
+                                togglePage(page.page);
                               }
-                            : undefined
-                        }
-                        type="button"
-                        title={reorderActive ? "Drag to reorder pages" : pageToolActive ? "Drag across pages to multi-select" : `Page ${page.page}`}
-                        draggable={reorderActive && !isBusy}
-                        onDragStart={(event) => {
-                          if (!reorderActive) {
-                            return;
-                          }
-                          event.stopPropagation();
-                          internalDragRef.current = true;
-                          dragDepthRef.current = 0;
-                          setDropOverlayActive(false);
-                          setReorderDragPage(page.page);
-                          event.dataTransfer.effectAllowed = "move";
-                          event.dataTransfer.setData("application/x-nodoc-page", String(page.page));
-                        }}
-                        onDragOver={(event) => {
-                          if (!reorderActive || isBusy) {
-                            return;
-                          }
-                          event.preventDefault();
-                          event.stopPropagation();
-                          event.dataTransfer.dropEffect = "move";
-                        }}
-                        onDrop={(event) => {
-                          if (!reorderActive || isBusy) {
-                            return;
-                          }
-                          event.preventDefault();
-                          event.stopPropagation();
-                          const draggedPage = Number(event.dataTransfer.getData("application/x-nodoc-page") || reorderDragPage);
-                          movePreviewPage(draggedPage, page.page);
-                          internalDragRef.current = false;
-                          setReorderDragPage(null);
-                        }}
-                        onDragEnd={(event) => {
-                          event.stopPropagation();
-                          internalDragRef.current = false;
-                          dragDepthRef.current = 0;
-                          setDropOverlayActive(false);
-                          setReorderDragPage(null);
-                        }}
-                        onPointerDown={(event) => beginPageDragSelection(page.page, event)}
-                        onPointerEnter={(event) => continuePageDragSelection(page.page, event)}
-                        onPointerUp={endPageDragSelection}
-                        onPointerCancel={endPageDragSelection}
-                        onClick={(event) => {
-                          if (reorderActive) {
-                            event.preventDefault();
-                            return;
-                          }
-                          if (!pageToolActive || rotateAppliesToAll) {
-                            event.preventDefault();
-                            if (pageToolActive && !rotateAppliesToAll) {
+                            }
+                          }}
+                          onKeyDown={(event) => {
+                            if (!pageToolActive || rotateAppliesToAll) {
+                              return;
+                            }
+                            if (event.key === " " || event.key === "Enter") {
+                              event.preventDefault();
                               togglePage(page.page);
                             }
-                          }
-                        }}
-                        onKeyDown={(event) => {
-                          if (!pageToolActive || rotateAppliesToAll) {
-                            return;
-                          }
-                          if (event.key === " " || event.key === "Enter") {
-                            event.preventDefault();
-                            togglePage(page.page);
-                          }
-                        }}
-                        disabled={isBusy}
-                      >
-                        <img src={page.image} alt={`Page ${page.page}`} draggable="false" />
-                        <span>{page.page}</span>
-                      </button>
-                    );
-                  })}
+                          }}
+                          disabled={isBusy}
+                        >
+                          {reorderActive && <strong className="page-thumb-order">#{visibleStartIndex + index + 1}</strong>}
+                          <LazyThumbImage
+                            previewSessionId={previewSessionId}
+                            pageNumber={page.page}
+                            fallbackImage={page.image}
+                            altText={`Page ${page.page}`}
+                            rootRef={previewScrollRef}
+                          />
+                          {reorderActive && <em className="page-thumb-hint">Drag</em>}
+                          <span>{page.page}</span>
+                        </button>
+                      );
+                    })}
+                    <div className="page-grid-spacer" aria-hidden="true" style={{ height: `${bottomSpacerHeight}px` }} />
+                  </div>
                 </div>
               )}
             </div>
@@ -2155,6 +2427,16 @@ export default function App() {
                 <button type="button" onClick={() => void exportResultsToFolder()} disabled={isBusy}>
                   <Icon name="folder" />
                   <span>Export</span>
+                </button>
+              ) : null}
+              <button type="button" onClick={() => loadPathItems(resultPaths, "Loaded result into workspace")} disabled={isBusy}>
+                <Icon name="openExternal" />
+                <span>Use</span>
+              </button>
+              {canUseDesktopBridge() ? (
+                <button type="button" onClick={() => void handleRevealPath(resultPaths[0] || outputFolder || pathFolder(resultPaths[0] || ""))} disabled={isBusy}>
+                  <Icon name="folder" />
+                  <span>Show folder</span>
                 </button>
               ) : null}
             </>

@@ -12,6 +12,7 @@ use tauri::{
     path::BaseDirectory,
     Manager,
 };
+use tauri_plugin_opener::OpenerExt;
 use tauri_plugin_dialog::{DialogExt, FilePath};
 use uuid::Uuid;
 
@@ -188,13 +189,40 @@ async fn copy_file_to_path(source_path: String, target_path: String) -> Result<(
     Ok(())
 }
 
+#[tauri::command]
+async fn reveal_path(app: AppHandle, path: String) -> Result<(), String> {
+    let target = PathBuf::from(path);
+    let reveal_target = if target.is_dir() {
+        target
+    } else {
+        target
+            .parent()
+            .map(PathBuf::from)
+            .ok_or_else(|| "Could not resolve parent folder".to_string())?
+    };
+
+    if !reveal_target.exists() {
+        return Err("Target folder was not found".to_string());
+    }
+
+    let as_text = reveal_target
+        .into_os_string()
+        .into_string()
+        .map_err(|_| "Target folder path is not valid UTF-8".to_string())?;
+
+    app.opener()
+        .open_path(as_text, None::<&str>)
+        .map_err(|error| format!("Could not open folder: {error}"))?;
+    Ok(())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_opener::init())
-        .invoke_handler(tauri::generate_handler![pick_files, pick_save_path, pick_folder, copy_file_to_path])
+        .invoke_handler(tauri::generate_handler![pick_files, pick_save_path, pick_folder, copy_file_to_path, reveal_path])
         .setup(|app| {
             let about = PredefinedMenuItem::about(
                 app,
@@ -214,13 +242,19 @@ pub fn run() {
 
             let file_menu = SubmenuBuilder::new(app, "File")
                 .text("file.open", "Open Files")
+                .text("file.output", "Choose Output Folder")
                 .text("file.clear", "Clear Workspace")
                 .separator()
                 .quit()
                 .build()?;
 
+            let edit_menu = SubmenuBuilder::new(app, "Edit")
+                .text("edit.cancel", "Cancel Current Task")
+                .build()?;
+
             let view_menu = SubmenuBuilder::new(app, "View")
                 .text("view.reload", "Reload")
+                .text("view.settings", "Show Settings")
                 .build()?;
 
             let help_menu = SubmenuBuilder::new(app, "Help")
@@ -229,7 +263,7 @@ pub fn run() {
                 .build()?;
 
             let menu = MenuBuilder::new(app)
-                .items(&[&file_menu, &view_menu, &help_menu])
+                .items(&[&file_menu, &edit_menu, &view_menu, &help_menu])
                 .build()?;
             menu.set_as_app_menu()?;
 
@@ -253,10 +287,16 @@ pub fn run() {
             if let Some(window) = app.get_webview_window("main") {
                 if event.id() == "file.open" {
                     let _ = dispatch_dom_event(&window, "nodoc-open-files");
+                } else if event.id() == "file.output" {
+                    let _ = dispatch_dom_event(&window, "nodoc-choose-output-folder");
                 } else if event.id() == "file.clear" {
                     let _ = dispatch_dom_event(&window, "nodoc-clear-files");
+                } else if event.id() == "edit.cancel" {
+                    let _ = dispatch_dom_event(&window, "nodoc-cancel-task");
                 } else if event.id() == "view.reload" {
                     let _ = window.eval("window.location.reload();");
+                } else if event.id() == "view.settings" {
+                    let _ = dispatch_dom_event(&window, "nodoc-open-settings");
                 } else if event.id() == "help.about" {
                     let _ = dispatch_dom_event(&window, "nodoc-about");
                 }

@@ -15,6 +15,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.organize import router as organize_router
+from app.api.library import router as library_router
 from app.api.results import router as results_router
 from app.config import settings
 from app.logging_conf import configure_logging
@@ -31,6 +32,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 app.include_router(organize_router, prefix="/organize", tags=["organize"])
+app.include_router(library_router, tags=["library"])
 app.include_router(results_router, prefix="/results", tags=["results"])
 
 

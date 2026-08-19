@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import base64
 import io
+from functools import lru_cache
 from pathlib import Path
 from typing import Callable
 
@@ -68,32 +69,65 @@ def pdf_to_images(
     finally:
         pdf.close()
 
-def render_pdf_preview(input_path: Path, max_pages: int = 48) -> list[dict[str, str | int | float]]:
+@lru_cache(maxsize=256)
+def _render_cached_page(input_path_str: str, page_number: int, scale: float) -> tuple[float, float, str]:
+    input_path = Path(input_path_str)
     try:
         pdf = pdfium.PdfDocument(str(input_path))
     except Exception as exc:
         raise PdfEngineError(f"'{input_path.name}' could not be read: {exc}") from exc
 
-    pages: list[dict[str, str | int]] = []
     try:
-        page_count = min(len(pdf), max_pages)
-        for index in range(page_count):
+        if page_number < 1 or page_number > len(pdf):
+            raise PdfEngineError(f"page {page_number} is out of range for '{input_path.name}'")
+        page = pdf[page_number - 1]
+        width, height = page.get_size()
+        bitmap = page.render(scale=scale).to_pil()
+        buffer = io.BytesIO()
+        bitmap.save(buffer, format="PNG")
+        bitmap.close()
+        page.close()
+        encoded = base64.b64encode(buffer.getvalue()).decode("ascii")
+        return float(width), float(height), f"data:image/png;base64,{encoded}"
+    finally:
+        pdf.close()
+
+
+def render_pdf_page(input_path: Path, page_number: int, scale: float = 0.55) -> dict[str, str | int | float]:
+    width, height, image = _render_cached_page(str(input_path), page_number, scale)
+    return {
+        "page": page_number,
+        "width": width,
+        "height": height,
+        "image": image,
+    }
+
+
+def render_pdf_manifest(input_path: Path) -> list[dict[str, str | int | float]]:
+    try:
+        pdf = pdfium.PdfDocument(str(input_path))
+    except Exception as exc:
+        raise PdfEngineError(f"'{input_path.name}' could not be read: {exc}") from exc
+
+    try:
+        pages: list[dict[str, str | int | float]] = []
+        for index in range(len(pdf)):
             page = pdf[index]
             width, height = page.get_size()
-            bitmap = page.render(scale=0.55).to_pil()
-            buffer = io.BytesIO()
-            bitmap.save(buffer, format="PNG")
-            bitmap.close()
             page.close()
-            encoded = base64.b64encode(buffer.getvalue()).decode("ascii")
-            pages.append(
-                {
-                    "page": index + 1,
-                    "width": float(width),
-                    "height": float(height),
-                    "image": f"data:image/png;base64,{encoded}",
-                }
-            )
+            pages.append({"page": index + 1, "width": float(width), "height": float(height), "image": ""})
         return pages
+    finally:
+        pdf.close()
+
+
+def render_pdf_preview(input_path: Path) -> list[dict[str, str | int | float]]:
+    try:
+        pdf = pdfium.PdfDocument(str(input_path))
+    except Exception as exc:
+        raise PdfEngineError(f"'{input_path.name}' could not be read: {exc}") from exc
+
+    try:
+        return [render_pdf_page(input_path, index + 1) for index in range(len(pdf))]
     finally:
         pdf.close()

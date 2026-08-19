@@ -246,6 +246,35 @@ def test_preview_pdf_path_succeeds_with_token(tmp_path: Path):
     assert pages[0]["image"].startswith("data:image/png;base64,")
 
 
+def test_preview_manifest_succeeds_with_token(tmp_path: Path):
+    source = make_pdf(tmp_path / "preview-manifest.pdf", 2)
+    resp = client.post(
+        "/organize/preview-manifest",
+        json={"input_paths": [str(source)]},
+        headers={"x-privatepdf-token": settings.auth_token},
+    )
+
+    assert resp.status_code == 200
+    payload = resp.json()
+    assert payload["preview_id"]
+    assert len(payload["pages"]) == 2
+    assert payload["pages"][0]["image"] == ""
+
+
+def test_preview_page_succeeds_with_token(tmp_path: Path):
+    source = make_pdf(tmp_path / "preview-page.pdf", 3)
+    resp = client.get(
+        "/organize/preview-page",
+        params={"path": str(source), "page": 2},
+        headers={"x-privatepdf-token": settings.auth_token},
+    )
+
+    assert resp.status_code == 200
+    payload = resp.json()["page"]
+    assert payload["page"] == 2
+    assert payload["image"].startswith("data:image/png;base64,")
+
+
 def test_extract_pages_upload_succeeds_with_token(tmp_path: Path):
     source = make_pdf(tmp_path / "extractme.pdf", 4)
     with source.open("rb") as source_file:
@@ -549,6 +578,23 @@ def test_download_result_and_zip_for_generated_output(tmp_path: Path):
     )
     assert zip_resp.status_code == 200
     assert zip_resp.content.startswith(b"PK")
+
+
+def test_recent_files_and_history_are_persisted(tmp_path: Path):
+    recent_resp = client.post(
+        "/library/recent",
+        json={"names": ["a.pdf", "b.pdf"]},
+        headers={"x-privatepdf-token": settings.auth_token},
+    )
+    assert recent_resp.status_code == 200
+    assert recent_resp.json()["names"] == ["a.pdf", "b.pdf"]
+
+    history_resp = client.get(
+        "/library/history",
+        headers={"x-privatepdf-token": settings.auth_token},
+    )
+    assert history_resp.status_code == 200
+    assert isinstance(history_resp.json()["items"], list)
 
 
 def test_health_endpoint_no_auth_needed():

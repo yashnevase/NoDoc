@@ -74,9 +74,9 @@ npm install
 npm run dev
 ```
 
-Then open the Vite URL shown in the terminal. The current UI is intentionally
-minimal but usable: drag/drop or browse files, choose a tool, then download the
-result file or ZIP.
+Then open the Vite URL shown in the terminal. The current UI supports
+drag/drop, desktop file picking, page preview, progress polling for longer
+jobs, result history, and direct export/download actions.
 
 Current local tools:
 
@@ -87,8 +87,19 @@ Current local tools:
 - Extract selected pages into a new PDF
 - Delete selected pages from a PDF
 - Rotate all pages, or selected pages, in a PDF
+- Reorder pages by dragging preview cards
 - Password-protect a PDF
-- Remove PDF metadata
+- Repair and rewrite a PDF
+- Check PDF signature fields and signing status
+- Add text, badge, or image watermarks
+
+Desktop workflow extras currently implemented:
+
+- Native file open, save, and folder pickers through Tauri
+- Export finished outputs to a chosen folder
+- Reuse result files directly as the next workspace input
+- Open the containing folder for generated output files
+- Windows file association metadata for PDF, PNG, JPG, JPEG, WEBP, and BMP via the installer bundle
 
 ## Desktop packaging path
 
@@ -106,6 +117,20 @@ powershell -ExecutionPolicy Bypass -File .\scripts\build-desktop.ps1
 
 Windows installer packaging will use Tauri's `msi`/`nsis` targets. macOS `.dmg`
 should be built on macOS, and Linux packages should be built on Linux.
+
+Final Windows installer artifacts are written to:
+
+```text
+desktop\target\release\bundle\
+```
+
+Typical outputs there are:
+
+- `nsis\*.exe` — installer executable
+- `msi\*.msi` — Windows Installer package
+
+The installed desktop app bundles the React frontend and the Python sidecar
+together, so end users do not run backend and frontend separately.
 
 ## Development principles
 

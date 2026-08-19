@@ -306,6 +306,42 @@ def reorder_pages(input_path: Path, output_path: Path, page_indices: list[int]) 
     return output_path
 
 
+def reverse_pages(input_path: Path, output_path: Path) -> Path:
+    """Reverse the order of every page in the PDF."""
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    with pikepdf.open(input_path) as doc:
+        with pikepdf.new() as target:
+            for page in reversed(doc.pages):
+                target.pages.append(page)
+            target.save(output_path)
+
+    return output_path
+
+
+def duplicate_pages(input_path: Path, output_path: Path, page_indices: list[int]) -> Path:
+    """Duplicate selected pages in-place after their original copies."""
+    if not page_indices:
+        raise PdfEngineError("no pages selected")
+
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    with pikepdf.open(input_path) as doc:
+        page_count = len(doc.pages)
+        if any(i < 0 or i >= page_count for i in page_indices):
+            raise PdfEngineError("one or more page numbers are out of range")
+
+        duplicates = list(page_indices)
+        with pikepdf.new() as target:
+            for index, page in enumerate(doc.pages):
+                target.pages.append(page)
+                if index in duplicates:
+                    target.pages.append(page)
+            target.save(output_path)
+
+    return output_path
+
+
 def repair(input_path: Path, output_path: Path) -> Path:
     """Best-effort rewrite for PDFs pikepdf can recover and resave cleanly."""
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -444,5 +480,79 @@ def add_image_watermark(
         raise PdfEngineError(f"'{input_path.name}' is password-protected") from exc
     except pikepdf.PdfError as exc:
         raise PdfEngineError(f"'{input_path.name}' could not be watermarked: {exc}") from exc
+
+    return output_path
+
+
+def add_page_numbers(
+    input_path: Path,
+    output_path: Path,
+    *,
+    page_indices: list[int] | None = None,
+    position: str = "bottom-right",
+    size: float = 12.0,
+    opacity: float = 0.7,
+    color: str = "#b02730",
+    prefix: str = "",
+    suffix: str = "",
+    start: int = 1,
+    on_progress: Callable[[int], None] | None = None,
+) -> Path:
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    opacity = _clamp(opacity, 0.05, 1.0)
+    size = _clamp(size, 10.0, 36.0)
+    rgb = _hex_to_rgb(color)
+
+    try:
+        with pikepdf.open(input_path) as doc:
+            target_pages = range(len(doc.pages)) if page_indices is None else page_indices
+            target_pages = list(target_pages)
+            for offset, i in enumerate(target_pages, start=1):
+                page = doc.pages[i]
+                gs_name = page.add_resource(
+                    pikepdf.Dictionary({"/CA": opacity, "/ca": opacity}),
+                    pikepdf.Name.ExtGState,
+                    prefix="NoDocGS",
+                )
+                media_box = [float(value) for value in page.MediaBox]
+                width = max(1.0, media_box[2] - media_box[0])
+                height = max(1.0, media_box[3] - media_box[1])
+                label = f"{prefix}{start + offset - 1}{suffix}"
+                text_width = _estimate_text_width(label, size)
+                box_width = text_width + max(12.0, size * 0.9)
+                box_height = size + max(10.0, size * 0.7)
+                x, y = _watermark_position(width, height, box_width, box_height, position)
+                x += box_width / 2
+                y += box_height / 2
+                x_text = -text_width / 2
+                y_text = -size / 3
+                content = (
+                    "q\n"
+                    f"/NoDocGS1 gs\n"
+                    "0.98 0.94 0.94 rg\n"
+                    f"{x:.2f} {y:.2f} {box_width:.2f} {box_height:.2f} re\n"
+                    "f\n"
+                    f"{rgb[0]:.3f} {rgb[1]:.3f} {rgb[2]:.3f} rg\n"
+                    f"BT\n/Helvetica-Bold {size:.2f} Tf\n"
+                    f"1 0 0 1 {x:.2f} {y:.2f} Tm\n"
+                    f"{x_text:.2f} {y_text:.2f} Td\n"
+                    f"({_escape_pdf_text(label)}) Tj\n"
+                    "ET\n"
+                    "Q\n"
+                ).encode("ascii", errors="ignore")
+                page.contents_add(
+                    pikepdf.Stream(
+                        doc,
+                        content.replace(b"/NoDocGS1", f"/{str(gs_name)[1:]}".encode("ascii")),
+                    )
+                )
+                if on_progress is not None:
+                    on_progress(int((offset / max(1, len(target_pages))) * 100))
+
+            doc.save(output_path)
+    except pikepdf.PasswordError as exc:
+        raise PdfEngineError(f"'{input_path.name}' is password-protected") from exc
+    except pikepdf.PdfError as exc:
+        raise PdfEngineError(f"'{input_path.name}' could not be numbered: {exc}") from exc
 
     return output_path
