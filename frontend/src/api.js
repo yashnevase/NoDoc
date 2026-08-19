@@ -339,6 +339,14 @@ export function repairPdfPath(paths, options) {
   return postJson("/organize/repair-pdf", { input_paths: paths }, options);
 }
 
+export function compressPdfUpload(files, preset, options) {
+  return postUpload("/organize/compress-pdf", files, { preset }, options);
+}
+
+export function compressPdfPath(paths, preset, options) {
+  return postJson(`/organize/compress-pdf?preset=${encodeURIComponent(preset || "balanced")}`, { input_paths: paths }, options);
+}
+
 export function signatureReportPath(paths, options) {
   return postJson("/organize/signature-report", { input_paths: paths }, options);
 }

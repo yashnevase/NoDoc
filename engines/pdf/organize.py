@@ -519,23 +519,20 @@ def add_page_numbers(
                 height = max(1.0, media_box[3] - media_box[1])
                 label = f"{prefix}{start + offset - 1}{suffix}"
                 text_width = _estimate_text_width(label, size)
-                box_width = text_width + max(12.0, size * 0.9)
-                box_height = size + max(10.0, size * 0.7)
-                x, y = _watermark_position(width, height, box_width, box_height, position)
-                x += box_width / 2
-                y += box_height / 2
-                x_text = -text_width / 2
-                y_text = -size / 3
+                box_width = text_width + max(14.0, size * 1.1)
+                box_height = size + max(8.0, size * 0.45)
+                x0, y0 = _watermark_position(width, height, box_width, box_height, position)
+                text_x = x0 + (box_width - text_width) / 2
+                text_y = y0 + (box_height - size) / 2 + (size * 0.1)
                 content = (
                     "q\n"
                     f"/NoDocGS1 gs\n"
-                    "0.98 0.94 0.94 rg\n"
-                    f"{x:.2f} {y:.2f} {box_width:.2f} {box_height:.2f} re\n"
+                    "1 1 1 rg\n"
+                    f"{x0:.2f} {y0:.2f} {box_width:.2f} {box_height:.2f} re\n"
                     "f\n"
                     f"{rgb[0]:.3f} {rgb[1]:.3f} {rgb[2]:.3f} rg\n"
                     f"BT\n/Helvetica-Bold {size:.2f} Tf\n"
-                    f"1 0 0 1 {x:.2f} {y:.2f} Tm\n"
-                    f"{x_text:.2f} {y_text:.2f} Td\n"
+                    f"1 0 0 1 {text_x:.2f} {text_y:.2f} Tm\n"
                     f"({_escape_pdf_text(label)}) Tj\n"
                     "ET\n"
                     "Q\n"

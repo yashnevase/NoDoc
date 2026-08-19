@@ -13,6 +13,7 @@ from app.services.organize_service import (
     add_image_watermark_file,
     add_page_numbers_file,
     add_text_watermark_file,
+    compress_pdf_file,
     cleanup_job_dir,
     create_upload_job_dir,
     delete_pages_file,
@@ -58,6 +59,18 @@ class ConvertResponse(BaseModel):
 
 class MultiOutputResponse(BaseModel):
     output_paths: list[str]
+
+
+class CompressRequest(BaseModel):
+    input_paths: list[str]
+    preset: str = "balanced"
+
+    @field_validator("input_paths")
+    @classmethod
+    def non_empty(cls, v: list[str]) -> list[str]:
+        if len(v) != 1:
+            raise ValueError("compress expects exactly one input PDF")
+        return v
 
 
 class DuplicateRequest(BaseModel):
@@ -658,6 +671,29 @@ async def repair_pdf(req: MergeRequest, async_job: bool = False) -> ConvertRespo
         )
     try:
         output = repair_pdf_file(Path(req.input_paths[0]))
+    except PdfEngineError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return ConvertResponse(output_path=str(output))
+
+
+@router.post("/compress-pdf", response_model=ConvertResponse | JobAcceptedResponse)
+async def compress_pdf(req: CompressRequest, async_job: bool = False) -> ConvertResponse | JobAcceptedResponse:
+    if async_job:
+        input_path = Path(req.input_paths[0])
+        return enqueue_job(
+            "compress_pdf",
+            lambda progress: {
+                "output_path": str(
+                    compress_pdf_file(
+                        input_path,
+                        preset=req.preset,
+                        on_progress=lambda value: progress(value, "Compressing PDF"),
+                    )
+                )
+            },
+        )
+    try:
+        output = compress_pdf_file(Path(req.input_paths[0]), preset=req.preset)
     except PdfEngineError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return ConvertResponse(output_path=str(output))

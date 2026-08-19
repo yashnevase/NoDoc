@@ -34,6 +34,8 @@ import {
   reversePagesUpload,
   duplicatePagesPath,
   duplicatePagesUpload,
+  compressPdfPath,
+  compressPdfUpload,
   pageNumbersPath,
   pageNumbersUpload,
   repairPdfPath,
@@ -82,6 +84,7 @@ const groups = [
       { id: "reorder", icon: "reorder", title: "Reorder", detail: "Drag pages into order", needs: "Drag pages", status: "ready" },
       { id: "reverse", icon: "reorder", title: "Reverse", detail: "Flip the page order", needs: "1 PDF", status: "ready" },
       { id: "duplicate", icon: "copy", title: "Duplicate", detail: "Duplicate picked pages", needs: "Pick pages", status: "ready" },
+      { id: "compress", icon: "archive", title: "Compress", detail: "Reduce PDF size", needs: "1 PDF", status: "ready" },
       { id: "batch", icon: "batch", title: "Batch", detail: "Run tools on many files", needs: "Later", status: "planned" },
     ],
   },
@@ -122,6 +125,7 @@ const groups = [
     id: "tools",
     label: "Tools",
     tools: [
+      { id: "reader", icon: "reader", title: "Reader", detail: "Focused PDF reading mode", needs: "1 PDF", status: "ready" },
       { id: "repair", icon: "repair", title: "Repair", detail: "Rewrite a clean PDF copy", needs: "1 PDF", status: "ready" },
       { id: "compare", icon: "compare", title: "Compare", detail: "Visual or text diff", needs: "Later", status: "planned" },
       { id: "pdfa", icon: "archive", title: "PDF/A", detail: "Archive validation", needs: "Complex", status: "planned" },
@@ -131,7 +135,7 @@ const groups = [
 
 const readyToolIds = new Set(groups.flatMap((group) => group.tools.filter((tool) => tool.status === "ready").map((tool) => tool.id)));
 const quickWatermarkAngles = [0, 90, 180, 270];
-const asyncToolIds = new Set(["merge", "images", "split", "render", "extract", "delete", "rotate", "reorder", "reverse", "duplicate", "password", "repair", "watermark", "page_numbers"]);
+const asyncToolIds = new Set(["merge", "images", "split", "render", "extract", "delete", "rotate", "reorder", "reverse", "duplicate", "compress", "password", "repair", "watermark", "page_numbers"]);
 
 function Icon({ name }) {
   const common = {
@@ -164,6 +168,7 @@ function Icon({ name }) {
     key: <><circle cx="8" cy="15" r="3" /><path d="M11 15h9" /><path d="M17 15v-3" /><path d="M14 15v-2" /></>,
     scan: <><path d="M4 8V5h3" /><path d="M17 5h3v3" /><path d="M20 16v3h-3" /><path d="M7 19H4v-3" /><path d="M7 12h10" /></>,
     search: <><circle cx="10" cy="10" r="5" /><path d="M14 14l5 5" /></>,
+    reader: <><path d="M5 4h10l4 4v12H5z" /><path d="M15 4v5h4" /><path d="M8 12h8" /><path d="M8 16h6" /></>,
     tag: <><path d="M4 12V5h7l9 9-7 7z" /><circle cx="8" cy="8" r="1" /></>,
     repair: <><path d="M14 5l5 5-9 9H5v-5z" /><path d="M12 7l5 5" /></>,
     compare: <><path d="M5 5h7v14H5z" /><path d="M12 8h7v11h-7" /></>,
@@ -307,21 +312,21 @@ function normalizeAngle(angle) {
   return value < 0 ? value + 360 : value;
 }
 
-function LazyThumbImage({ previewSessionId, pageNumber, fallbackImage, altText, rootRef }) {
+function LazyThumbImage({ previewSessionId, pageNumber, fallbackImage, altText, rootRef, scale = 0.55, className = "" }) {
   const thumbRef = useRef(null);
   const [image, setImage] = useState(fallbackImage || "");
 
   useEffect(() => {
     setImage(fallbackImage || "");
-  }, [fallbackImage, pageNumber]);
+  }, [fallbackImage, pageNumber, scale]);
 
   useEffect(() => {
-    if (!previewSessionId || image) {
+    if (!previewSessionId) {
       return undefined;
     }
 
     let mounted = true;
-    void previewPdfPage(previewSessionId, pageNumber, { scale: 0.55 })
+    void previewPdfPage(previewSessionId, pageNumber, { scale })
       .then((response) => {
         if (mounted) {
           setImage(response.page.image || "");
@@ -331,9 +336,9 @@ function LazyThumbImage({ previewSessionId, pageNumber, fallbackImage, altText, 
     return () => {
       mounted = false;
     };
-  }, [image, pageNumber, previewSessionId]);
+  }, [pageNumber, previewSessionId, scale]);
 
-  return <img ref={thumbRef} src={image || "about:blank"} alt={altText} draggable="false" style={{ visibility: image ? "visible" : "hidden" }} />;
+  return <img ref={thumbRef} className={className} src={image || "about:blank"} alt={altText} draggable="false" style={{ visibility: image ? "visible" : "hidden" }} />;
 }
 
 export default function App() {
@@ -344,8 +349,11 @@ export default function App() {
   const [activeTool, setActiveTool] = useState("render");
   const [selectedPages, setSelectedPages] = useState([]);
   const [pagePreview, setPagePreview] = useState([]);
+  const [readerPageIndex, setReaderPageIndex] = useState(0);
+  const [readerZoom, setReaderZoom] = useState(1);
   const [rotation, setRotation] = useState(90);
   const [rotateScope, setRotateScope] = useState("selected");
+  const [compressPreset, setCompressPreset] = useState("balanced");
   const [password, setPassword] = useState("");
   const [watermarkText, setWatermarkText] = useState("NoDoc");
   const [watermarkMode, setWatermarkMode] = useState("text");
@@ -402,14 +410,25 @@ export default function App() {
   const previewSourceKey = fileItems.map((item) => item.source === "path" ? `p:${item.path}` : `u:${item.name}:${item.file.size}:${item.file.lastModified}`).join("|");
   const resultPaths = result?.paths || [];
   const previewPage = pagePreview[0];
+  const currentReaderIndex = pagePreview.length ? clamp(readerPageIndex, 0, pagePreview.length - 1) : 0;
+  const currentReaderPage = pagePreview[currentReaderIndex] || null;
   const previewPageNumber = previewPage?.page || 1;
   const previewPageLabel = previewPage
     ? `${Math.round(previewPage.width)} x ${Math.round(previewPage.height)} pt`
+    : "Page preview";
+  const readerPageLabel = currentReaderPage
+    ? `${Math.round(currentReaderPage.width)} x ${Math.round(currentReaderPage.height)} pt`
     : "Page preview";
   const previewPaperStyle = previewPage
     ? {
         aspectRatio: `${Math.max(1, previewPage.width)} / ${Math.max(1, previewPage.height)}`,
         maxHeight: "min(34vh, 280px)",
+      }
+    : undefined;
+  const readerPaperStyle = currentReaderPage
+    ? {
+        aspectRatio: `${Math.max(1, currentReaderPage.width)} / ${Math.max(1, currentReaderPage.height)}`,
+        width: `${Math.round(clamp(620 * readerZoom, 320, 1160))}px`,
       }
     : undefined;
   const pageGridItemHeight = 208;
@@ -441,6 +460,7 @@ export default function App() {
           : { left: "50%", top: "50%" };
   const isBusy = Boolean(busyLabel);
   const showCancelAction = isBusy || previewBusy;
+  const readerActive = activeTool === "reader";
   const pageToolActive = ["extract", "delete", "rotate", "watermark", "duplicate"].includes(activeTool);
   const reorderActive = activeTool === "reorder";
   const watermarkAllPages = activeTool === "watermark" && watermarkScope === "all";
@@ -557,6 +577,41 @@ export default function App() {
       previewScrollRef.current.scrollTop = 0;
     }
   }, [activeTool, pagePreview.length, previewBusy]);
+
+  useEffect(() => {
+    if (!pagePreview.length) {
+      setReaderPageIndex(0);
+      return;
+    }
+    setReaderPageIndex((current) => clamp(current, 0, pagePreview.length - 1));
+  }, [pagePreview.length]);
+
+  useEffect(() => {
+    if (!readerActive) {
+      return () => {};
+    }
+
+    function handleReaderKeys(event) {
+      if (event.target instanceof HTMLElement) {
+        const tag = event.target.tagName;
+        if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") {
+          return;
+        }
+      }
+      if (event.key === "ArrowRight" || event.key === "PageDown") {
+        event.preventDefault();
+        setReaderPageIndex((current) => clamp(current + 1, 0, Math.max(0, pagePreview.length - 1)));
+      } else if (event.key === "ArrowLeft" || event.key === "PageUp") {
+        event.preventDefault();
+        setReaderPageIndex((current) => clamp(current - 1, 0, Math.max(0, pagePreview.length - 1)));
+      }
+    }
+
+    window.addEventListener("keydown", handleReaderKeys);
+    return () => {
+      window.removeEventListener("keydown", handleReaderKeys);
+    };
+  }, [pagePreview.length, readerActive]);
 
   useEffect(() => {
     let isCurrent = true;
@@ -749,6 +804,12 @@ export default function App() {
         if ([0, 90, 180, 270].includes(preferences.rotation)) {
           setRotation(preferences.rotation);
         }
+        if (typeof preferences.readerZoom === "number") {
+          setReaderZoom(clamp(preferences.readerZoom, 0.8, 1.8));
+        }
+        if (["balanced", "small", "max"].includes(preferences.compressPreset)) {
+          setCompressPreset(preferences.compressPreset);
+        }
         if (["selected", "all"].includes(preferences.rotateScope)) {
           setRotateScope(preferences.rotateScope);
         }
@@ -827,7 +888,9 @@ export default function App() {
       JSON.stringify({
         activeGroup,
         activeTool,
+        readerZoom,
         rotation,
+        compressPreset,
         rotateScope,
         watermarkScope,
         watermarkMode,
@@ -839,7 +902,7 @@ export default function App() {
         watermarkColor,
       })
     );
-  }, [activeGroup, activeTool, rotation, rotateScope, watermarkScope, watermarkMode, watermarkPreset, watermarkPosition, watermarkAngle, watermarkSize, watermarkOpacity, watermarkColor]);
+  }, [activeGroup, activeTool, readerZoom, rotation, compressPreset, rotateScope, watermarkScope, watermarkMode, watermarkPreset, watermarkPosition, watermarkAngle, watermarkSize, watermarkOpacity, watermarkColor]);
 
   useEffect(() => {
     window.localStorage.setItem(historyKey, JSON.stringify(jobHistory));
@@ -921,6 +984,7 @@ export default function App() {
       id: `${Date.now()}-${toolId}`,
       createdAt: Date.now(),
       tool: toolTitle,
+      toolId,
       paths,
       outputs: paths.map((path) => pathName(path)),
       count: paths.length,
@@ -1139,12 +1203,14 @@ export default function App() {
       next.splice(toIndex, 0, moved);
       return next;
     });
+    setSelectedPages([]);
     setResult(null);
     setStatus("Page order changed");
   }
 
   function resetPageOrder() {
     setPagePreview((current) => [...current].sort((a, b) => a.page - b.page));
+    setSelectedPages([]);
     setReorderDragPage(null);
     setResult(null);
     setStatus("Page order reset");
@@ -1197,7 +1263,7 @@ export default function App() {
     if (activeTool === "images" && !allSelectedAreImages) {
       return "Select one or more image files.";
     }
-    if (["split", "render", "extract", "delete", "rotate", "reorder", "password", "repair", "watermark", "digital_sign", "page_numbers"].includes(activeTool) && !exactlyOnePdfSelected) {
+    if (["reader", "split", "render", "extract", "delete", "rotate", "reorder", "compress", "password", "repair", "watermark", "digital_sign", "page_numbers"].includes(activeTool) && !exactlyOnePdfSelected) {
       return "Select exactly one PDF file.";
     }
     if (["extract", "delete", "duplicate"].includes(activeTool) && selectedPages.length === 0) {
@@ -1345,6 +1411,10 @@ export default function App() {
         } else if (activeTool === "duplicate") {
           const duplicatePages = pagesToRange(selectedPages);
           response = hasPaths ? await duplicatePagesPath(pathInputs, duplicatePages, requestOptions) : await duplicatePagesUpload(uploadedFiles, duplicatePages, requestOptions);
+        } else if (activeTool === "compress") {
+          response = hasPaths
+            ? await compressPdfPath(pathInputs, compressPreset, requestOptions)
+            : await compressPdfUpload(uploadedFiles, compressPreset, requestOptions);
         } else if (activeTool === "page_numbers") {
           const numberPages = selectedPages.length ? pagesToRange(selectedPages) : "";
           const numberPayload = {
@@ -1540,6 +1610,7 @@ export default function App() {
                     <li key={entry.id}>
                       <div className="settings-list-main">
                         <strong>{entry.tool}</strong>
+                        <span>{entry.count === 1 ? entry.outputs[0] : `${entry.count} outputs`}</span>
                         <span>{entry.outputs.join(", ")}</span>
                         <em>{formatTime(entry.createdAt)}</em>
                       </div>
@@ -1683,6 +1754,7 @@ export default function App() {
                     <span>Download ZIP</span>
                   </button>
                 )}
+                <span>{resultPaths.length ? `${resultPaths.length} file${resultPaths.length === 1 ? "" : "s"} ready` : "No result yet"}</span>
                 {canUseDesktopBridge() && outputFolder ? (
                   <button type="button" onClick={() => void exportResultsToFolder()} disabled={isBusy}>
                     <Icon name="folder" />
@@ -1755,10 +1827,73 @@ export default function App() {
               </label>
             )}
 
-            <button className="primary-action" type="button" onClick={runActiveTool} disabled={isBusy}>
-              <Icon name="check" />
-              <span>{activeTool === "digital_sign" ? "Check" : readyToolIds.has(activeTool) ? "Apply" : "Planned"}</span>
-            </button>
+            {activeTool === "compress" && (
+              <div className="segmented-control compress-control" aria-label="Compression preset">
+                {[
+                  { id: "balanced", label: "Balanced" },
+                  { id: "small", label: "Small" },
+                  { id: "max", label: "Max" },
+                ].map((preset) => (
+                  <button
+                    className={compressPreset === preset.id ? "is-active" : ""}
+                    key={preset.id}
+                    type="button"
+                    onClick={() => setCompressPreset(preset.id)}
+                    disabled={isBusy}
+                    title={preset.label}
+                  >
+                    <span>{preset.label}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+
+            {readerActive && (
+              <>
+                <div className="segmented-control reader-nav-control" aria-label="Reader navigation">
+                  <button
+                    type="button"
+                    onClick={() => setReaderPageIndex((current) => clamp(current - 1, 0, Math.max(0, pagePreview.length - 1)))}
+                    disabled={isBusy || currentReaderIndex <= 0}
+                  >
+                    <span>Prev</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setReaderPageIndex((current) => clamp(current + 1, 0, Math.max(0, pagePreview.length - 1)))}
+                    disabled={isBusy || currentReaderIndex >= pagePreview.length - 1}
+                  >
+                    <span>Next</span>
+                  </button>
+                </div>
+
+                <div className="segmented-control reader-zoom-control" aria-label="Reader zoom">
+                  {[
+                    { value: 0.9, label: "Fit" },
+                    { value: 1, label: "100%" },
+                    { value: 1.25, label: "125%" },
+                    { value: 1.5, label: "150%" },
+                  ].map((zoom) => (
+                    <button
+                      className={Math.abs(readerZoom - zoom.value) < 0.01 ? "is-active" : ""}
+                      key={zoom.label}
+                      type="button"
+                      onClick={() => setReaderZoom(zoom.value)}
+                      disabled={isBusy}
+                    >
+                      <span>{zoom.label}</span>
+                    </button>
+                  ))}
+                </div>
+              </>
+            )}
+
+            {!readerActive && (
+              <button className="primary-action" type="button" onClick={runActiveTool} disabled={isBusy}>
+                <Icon name="check" />
+                <span>{activeTool === "digital_sign" ? "Check" : readyToolIds.has(activeTool) ? "Apply" : "Planned"}</span>
+              </button>
+            )}
 
             {showCancelAction && (
               <button type="button" className="secondary-action" onClick={cancelCurrentWork}>
@@ -1853,12 +1988,79 @@ export default function App() {
             <div className="preview-panel">
               <div className="panel-heading">
                 <h2>Pages</h2>
-              <div className="preview-meta">
-                <span>{previewBusy ? "..." : `${pagePreview.length} total`}</span>
-                {pageToolActive && <span>{selectionLabel}</span>}
-                {reorderActive && reorderChanged && <span>Order changed</span>}
+                <div className="preview-meta">
+                  <span>{previewBusy ? "..." : `${pagePreview.length} total`}</span>
+                  {pageToolActive && <span>{selectionLabel}</span>}
+                  {readerActive && currentReaderPage && <span>{`Page ${currentReaderIndex + 1} / ${pagePreview.length}`}</span>}
+                  {reorderActive && reorderChanged && <span>Order changed</span>}
+                </div>
               </div>
-            </div>
+
+              {readerActive && (
+                <div className="reader-panel">
+                  <div className="reader-summary">
+                    <div>
+                      <strong>{currentReaderPage ? `Page ${currentReaderIndex + 1}` : "Reader"}</strong>
+                      <span>{readerPageLabel}</span>
+                    </div>
+                    <div className="reader-summary-pills">
+                      <span>{`${Math.round(readerZoom * 100)}% zoom`}</span>
+                      <span>{pagePreview.length ? `${pagePreview.length} pages` : "No pages"}</span>
+                    </div>
+                  </div>
+
+                  {previewBusy ? (
+                    <div className="preview-loading">
+                      <span />
+                      <p>Rendering preview</p>
+                    </div>
+                  ) : (
+                    <div className="reader-layout">
+                      <aside className="reader-strip">
+                        {pagePreview.map((page, index) => (
+                          <button
+                            key={page.page}
+                            type="button"
+                            className={`reader-strip-item ${index === currentReaderIndex ? "is-active" : ""}`}
+                            onClick={() => setReaderPageIndex(index)}
+                            disabled={isBusy}
+                            title={`Open page ${index + 1}`}
+                          >
+                            <LazyThumbImage
+                              previewSessionId={previewSessionId}
+                              pageNumber={page.page}
+                              fallbackImage={page.image}
+                              altText={`Page ${index + 1}`}
+                              rootRef={previewScrollRef}
+                              scale={0.4}
+                            />
+                            <span>{index + 1}</span>
+                          </button>
+                        ))}
+                      </aside>
+
+                      <div className="reader-canvas" ref={previewScrollRef}>
+                        {currentReaderPage ? (
+                          <div className="reader-paper" style={readerPaperStyle}>
+                            <div className="reader-paper-size">{readerPageLabel}</div>
+                            <LazyThumbImage
+                              previewSessionId={previewSessionId}
+                              pageNumber={currentReaderPage.page}
+                              fallbackImage={currentReaderPage.image}
+                              altText={`Reader page ${currentReaderIndex + 1}`}
+                              rootRef={previewScrollRef}
+                              scale={clamp(readerZoom * 1.2, 0.85, 2)}
+                              className="reader-paper-image"
+                            />
+                          </div>
+                        ) : (
+                          <div className="reader-empty">Choose a page to begin reading.</div>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
 
               {pageToolActive && (
                 <div className="preview-toolbar">
@@ -2286,12 +2488,12 @@ export default function App() {
                 </div>
               )}
 
-              {previewBusy ? (
+              {!readerActive && previewBusy ? (
                 <div className="preview-loading">
                   <span />
                   <p>Rendering preview</p>
                 </div>
-              ) : (
+              ) : !readerActive ? (
                 <div className="page-grid-viewport" ref={previewScrollRef}>
                   <div className={`page-grid preview-${activeTool}`}>
                     <div className="page-grid-spacer" aria-hidden="true" style={{ height: `${topSpacerHeight}px` }} />
@@ -2324,6 +2526,7 @@ export default function App() {
                             setReorderDragPage(page.page);
                             event.dataTransfer.effectAllowed = "move";
                             event.dataTransfer.setData("application/x-nodoc-page", String(page.page));
+                            event.dataTransfer.setData("text/plain", String(page.page));
                           }}
                           onDragOver={(event) => {
                             if (!reorderActive || isBusy) {
@@ -2378,7 +2581,7 @@ export default function App() {
                           }}
                           disabled={isBusy}
                         >
-                          {reorderActive && <strong className="page-thumb-order">#{visibleStartIndex + index + 1}</strong>}
+                          {reorderActive && <strong className="page-thumb-order" data-page={visibleStartIndex + index + 1}>#{visibleStartIndex + index + 1}</strong>}
                           <LazyThumbImage
                             previewSessionId={previewSessionId}
                             pageNumber={page.page}
@@ -2394,7 +2597,7 @@ export default function App() {
                     <div className="page-grid-spacer" aria-hidden="true" style={{ height: `${bottomSpacerHeight}px` }} />
                   </div>
                 </div>
-              )}
+              ) : null}
             </div>
           ) : (
             <div className="blank-canvas">

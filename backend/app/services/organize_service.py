@@ -13,6 +13,7 @@ from typing import Callable
 
 from app.config import settings
 from engines.images.to_pdf import images_to_pdf as engine_images_to_pdf
+from engines.pdf.compress import compress_pdf as engine_compress_pdf
 from engines.pdf.convert import pdf_to_images as engine_pdf_to_images
 from engines.pdf.convert import split_pdf as engine_split_pdf
 from engines.pdf.organize import add_image_watermark as engine_add_image_watermark
@@ -99,6 +100,16 @@ def duplicate_pages_file(input_path: Path, page_indices: list[int]) -> Path:
 def repair_pdf_file(input_path: Path) -> Path:
     output = safe_output_path(input_path, "repaired")
     return engine_repair(input_path, output)
+
+
+def compress_pdf_file(
+    input_path: Path,
+    *,
+    preset: str = "balanced",
+    on_progress: Callable[[int], None] | None = None,
+) -> Path:
+    output = safe_output_path(input_path, "compressed")
+    return engine_compress_pdf(input_path, output, preset=preset, on_progress=on_progress)
 
 
 def add_text_watermark_file(
