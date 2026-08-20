@@ -26,6 +26,7 @@ from app.api.organize_models import (
     ConvertResponse,
     DuplicateRequest,
     MetadataRequest,
+    RedactRequest,
     JobAcceptedResponse,
     MergeRequest,
     MergeResponse,
@@ -42,6 +43,7 @@ from app.services.organize_service import (
     add_text_watermark_file,
     crop_pdf_file,
     compress_pdf_file,
+    redact_pdf_file,
     read_metadata_file,
     write_metadata_file,
     delete_pages_file,
@@ -446,6 +448,36 @@ async def metadata_view(req: MergeRequest) -> dict[str, object]:
     input_path = require_single_input(req.input_paths, "metadata-view expects exactly one input PDF")
     try:
         return {"metadata": read_metadata_file(input_path)}
+    except PdfEngineError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/redact-pdf", response_model=ConvertResponse | JobAcceptedResponse)
+async def redact_pdf(req: RedactRequest, async_job: bool = False) -> ConvertResponse | JobAcceptedResponse:
+    input_path = require_single_input(req.input_paths, "redact-pdf expects exactly one input PDF")
+    regions = [region.model_dump() for region in req.regions]
+    if async_job:
+        return enqueue_job(
+            "redact_pdf",
+            lambda progress: {
+                "output_path": str(
+                    redact_pdf_file(
+                        input_path,
+                        regions=regions,
+                        color=req.color,
+                        on_progress=lambda value: progress(value, "Applying redactions"),
+                    )
+                )
+            },
+        )
+    try:
+        return convert_response(
+            redact_pdf_file(
+                input_path,
+                regions=regions,
+                color=req.color,
+            )
+        )
     except PdfEngineError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 

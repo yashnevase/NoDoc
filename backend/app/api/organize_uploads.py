@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
@@ -22,10 +23,11 @@ from app.api.organize_models import (
     CropRequest,
     JobAcceptedResponse,
     MergeResponse,
+    MetadataRequest,
     MultiOutputResponse,
     PreviewManifestResponse,
     PreviewResponse,
-    MetadataRequest,
+    RedactionRegion,
     SignatureReport,
 )
 from app.services.organize_service import (
@@ -41,6 +43,7 @@ from app.services.organize_service import (
     extract_pages_file,
     images_to_pdf_files_to_output,
     inspect_signatures_file,
+    redact_pdf_file,
     read_metadata_file,
     merge_files_to_output,
     password_protect_file,
@@ -522,6 +525,44 @@ async def metadata_upload(
                 remove_all=remove_all,
             )
         )
+    except PdfEngineError as exc:
+        cleanup_job_dir(job_dir)
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/redact-pdf-upload", response_model=ConvertResponse | JobAcceptedResponse)
+async def redact_pdf_upload(
+    files: list[UploadFile] = File(...),
+    regions: str = Form(...),
+    color: str = Form("#000000"),
+    async_job: bool = False,
+) -> ConvertResponse | JobAcceptedResponse:
+    if len(files) != 1:
+        raise HTTPException(status_code=400, detail="redact-pdf-upload expects exactly one PDF")
+
+    try:
+        parsed_regions = [RedactionRegion.model_validate(item).model_dump() for item in json.loads(regions)]
+    except (json.JSONDecodeError, ValueError, TypeError) as exc:
+        raise HTTPException(status_code=400, detail=f"invalid redaction payload: {exc}") from exc
+
+    job_dir = create_upload_job_dir()
+    try:
+        target_path = await save_upload(files[0], job_dir, "input.pdf")
+        if async_job:
+            return enqueue_job(
+                "redact_pdf_upload",
+                lambda progress: {
+                    "output_path": str(
+                        redact_pdf_file(
+                            target_path,
+                            regions=parsed_regions,
+                            color=color,
+                            on_progress=lambda value: progress(value, "Applying redactions"),
+                        )
+                    )
+                },
+            )
+        return convert_response(redact_pdf_file(target_path, regions=parsed_regions, color=color))
     except PdfEngineError as exc:
         cleanup_job_dir(job_dir)
         raise HTTPException(status_code=400, detail=str(exc)) from exc

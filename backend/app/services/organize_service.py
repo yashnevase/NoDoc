@@ -28,6 +28,7 @@ from engines.pdf.organize import duplicate_pages as engine_duplicate_pages
 from engines.pdf.organize import repair as engine_repair
 from engines.pdf.organize import reverse_pages as engine_reverse_pages
 from engines.pdf.organize import rotate as engine_rotate
+from engines.pdf.redact import redact_pages as engine_redact_pages
 from engines.pdf.security import password_protect as engine_password_protect
 from engines.pdf.security import inspect_signatures as engine_inspect_signatures
 from engines.metadata.pdf_metadata import read_metadata as engine_read_metadata
@@ -265,6 +266,23 @@ def crop_pdf_file(
         top=top,
         right=right,
         bottom=bottom,
+    )
+
+
+def redact_pdf_file(
+    input_path: Path,
+    *,
+    regions: list[dict[str, float | int]],
+    color: str = "#000000",
+    on_progress: Callable[[int], None] | None = None,
+) -> Path:
+    output = safe_output_path(input_path, "redacted")
+    return engine_redact_pages(
+        input_path,
+        output,
+        regions=regions,
+        color=color,
+        on_progress=on_progress,
     )
 
 

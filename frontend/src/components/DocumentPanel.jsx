@@ -3,6 +3,7 @@ import { PageGrid } from "./PageGrid";
 import { ReaderPanel } from "./ReaderPanel";
 import { CropEditor } from "./CropEditor";
 import { MetadataEditor } from "./MetadataEditor";
+import { RedactEditor } from "./RedactEditor";
 import { SignatureReportView } from "./SignatureReportView";
 import { WatermarkEditor } from "./WatermarkEditor";
 
@@ -87,6 +88,15 @@ export function DocumentPanel({
   metadataForm,
   loadMetadata,
   removeAllMetadata,
+  redactColor,
+  redactRegions,
+  activeRedactionPage,
+  addRedactionRect,
+  removeRedactionRect,
+  clearRedactionsForPage,
+  clearAllRedactions,
+  setActiveRedactionPage,
+  setRedactColor,
   setMetadataForm,
   setCrop,
   setCropScope,
@@ -241,6 +251,24 @@ export function DocumentPanel({
               removeAllMetadata={removeAllMetadata}
               selectedPages={selectedPages}
               setMetadataForm={setMetadataForm}
+            />
+          )}
+
+          {activeTool === "redact" && (
+            <RedactEditor
+              activeRedactionPage={activeRedactionPage}
+              addRedactionRect={addRedactionRect}
+              clearAllRedactions={clearAllRedactions}
+              clearRedactionsForPage={clearRedactionsForPage}
+              isBusy={isBusy}
+              pagePreview={pagePreview}
+              previewSessionId={previewSessionId}
+              redactColor={redactColor}
+              redactRegions={redactRegions}
+              removeRedactionRect={removeRedactionRect}
+              selectedPages={selectedPages}
+              setActiveRedactionPage={setActiveRedactionPage}
+              setRedactColor={setRedactColor}
             />
           )}
 

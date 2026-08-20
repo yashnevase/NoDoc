@@ -44,7 +44,7 @@ export const groups = [
       { id: "draw", icon: "draw", title: "Draw", detail: "Ink and shapes", needs: "Later", status: "planned" },
       { id: "highlight", icon: "highlight", title: "Highlight", detail: "Mark page areas", needs: "Later", status: "planned" },
       { id: "sign", icon: "sign", title: "Sign", detail: "Image signature first", needs: "Later", status: "planned" },
-      { id: "redact", icon: "redact", title: "Redact", detail: "True content removal", needs: "Complex", status: "planned" },
+      { id: "redact", icon: "redact", title: "Redact", detail: "Flatten boxed regions safely", needs: "Draw boxes", status: "ready" },
     ],
   },
   {
@@ -98,6 +98,7 @@ export const asyncToolIds = new Set([
   "reverse",
   "duplicate",
   "compress",
+  "redact",
   "password",
   "repair",
   "watermark",

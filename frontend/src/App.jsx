@@ -50,6 +50,8 @@ import {
   cropPdfUpload,
   compressPdfPath,
   compressPdfUpload,
+  redactPdfPath,
+  redactPdfUpload,
   metadataPath,
   metadataUpload,
   metadataViewPath,
@@ -105,6 +107,9 @@ export default function App() {
   const [compressPreset, setCompressPreset] = useState("balanced");
   const [cropScope, setCropScope] = useState("selected");
   const [crop, setCrop] = useState({ left: 0, top: 0, right: 0, bottom: 0 });
+  const [redactRegions, setRedactRegions] = useState({});
+  const [redactColor, setRedactColor] = useState("#121212");
+  const [activeRedactionPage, setActiveRedactionPage] = useState(null);
   const [metadataForm, setMetadataForm] = useState({
     title: "",
     author: "",
@@ -193,12 +198,13 @@ export default function App() {
   const isBusy = Boolean(busyLabel);
   const showCancelAction = isBusy || previewBusy;
   const readerActive = activeTool === "reader";
-  const pageToolActive = ["extract", "delete", "rotate", "watermark", "duplicate", "crop", "metadata"].includes(activeTool);
+  const pageToolActive = ["extract", "delete", "rotate", "watermark", "duplicate", "crop", "metadata", "redact"].includes(activeTool);
   const reorderActive = activeTool === "reorder";
   const watermarkAllPages = activeTool === "watermark" && watermarkScope === "all";
   const cropAllPages = activeTool === "crop" && cropScope === "all";
   const reorderChanged = pagePreview.length > 0 && pagePreview.some((page, index) => page.page !== index + 1);
   const rotateAppliesToAll = activeTool === "rotate" && rotateScope === "all";
+  const redactionRegionCount = Object.values(redactRegions).reduce((sum, regions) => sum + regions.length, 0);
   const pageSelectionLocked = rotateAppliesToAll || watermarkAllPages || cropAllPages;
   const selectionLabel = pageToolActive && pagePreview.length
     ? pageSelectionLocked
@@ -357,6 +363,8 @@ export default function App() {
     setPreviewSessionId("");
     setSignatureReport(null);
     setSignatureBusy(false);
+    setRedactRegions({});
+    setActiveRedactionPage(null);
     setReorderDragPage(null);
     setPreviewTick((value) => value + 1);
     rememberRecentFiles(nextItems.map((item) => item.name));
@@ -367,6 +375,8 @@ export default function App() {
     const nextItems = uploadItems(files);
     setFileItems(nextItems);
     setResult(null);
+    setRedactRegions({});
+    setActiveRedactionPage(null);
     rememberRecentFiles(nextItems.map((item) => item.name));
     setStatus("Files loaded");
   }
@@ -385,6 +395,8 @@ export default function App() {
         const nextItems = pathItems(paths);
         setFileItems(nextItems);
         setResult(null);
+        setRedactRegions({});
+        setActiveRedactionPage(null);
         rememberRecentFiles(nextItems.map((item) => item.name));
         setStatus(`Opened ${nextItems.length} file${nextItems.length === 1 ? "" : "s"}`);
         return;
@@ -416,6 +428,8 @@ export default function App() {
     setPreviewSessionId("");
     setSignatureReport(null);
     setSignatureBusy(false);
+    setRedactRegions({});
+    setActiveRedactionPage(null);
     setBusyLabel("");
     setPreviewBusy(false);
     setReorderDragPage(null);
@@ -470,6 +484,9 @@ export default function App() {
     if (!["extract", "delete", "rotate", "watermark", "duplicate", "page_numbers"].includes(tool.id)) {
       setSelectedPages([]);
     }
+    if (tool.id !== "redact") {
+      setActiveRedactionPage(null);
+    }
     if (tool.status !== "ready") {
       setStatus(`${tool.title} is planned for a later build.`);
     }
@@ -497,6 +514,52 @@ export default function App() {
 
   function clearPages() {
     setSelectedPages([]);
+  }
+
+  function addRedactionRect(pageNumber, rect) {
+    setRedactRegions((current) => ({
+      ...current,
+      [pageNumber]: [...(current[pageNumber] || []), rect],
+    }));
+    setActiveRedactionPage(pageNumber);
+    setSelectedPages([pageNumber]);
+    setResult(null);
+    setStatus(`Redaction box added on page ${pageNumber}`);
+  }
+
+  function removeRedactionRect(pageNumber, indexToRemove) {
+    setRedactRegions((current) => {
+      const next = { ...current };
+      const pageRects = [...(next[pageNumber] || [])];
+      pageRects.splice(indexToRemove, 1);
+      if (pageRects.length) {
+        next[pageNumber] = pageRects;
+      } else {
+        delete next[pageNumber];
+      }
+      return next;
+    });
+    setResult(null);
+    setStatus(`Redaction box removed from page ${pageNumber}`);
+  }
+
+  function clearRedactionsForPage(pageNumber) {
+    setRedactRegions((current) => {
+      if (!current[pageNumber]?.length) {
+        return current;
+      }
+      const next = { ...current };
+      delete next[pageNumber];
+      return next;
+    });
+    setResult(null);
+    setStatus(`Cleared redactions on page ${pageNumber}`);
+  }
+
+  function clearAllRedactions() {
+    setRedactRegions({});
+    setResult(null);
+    setStatus("All redaction boxes cleared");
   }
 
   function setPageSelection(pageNumber, shouldSelect) {
@@ -643,7 +706,7 @@ export default function App() {
     if (activeTool === "images" && !allSelectedAreImages) {
       return "Select one or more image files.";
     }
-  if (["reader", "split", "render", "extract", "delete", "rotate", "reorder", "compress", "password", "repair", "watermark", "digital_sign", "page_numbers", "crop", "metadata"].includes(activeTool) && !exactlyOnePdfSelected) {
+  if (["reader", "split", "render", "extract", "delete", "rotate", "reorder", "compress", "password", "repair", "watermark", "digital_sign", "page_numbers", "crop", "metadata", "redact"].includes(activeTool) && !exactlyOnePdfSelected) {
       return "Select exactly one PDF file.";
     }
     if (["extract", "delete", "duplicate", "crop"].includes(activeTool) && selectedPages.length === 0) {
@@ -666,6 +729,9 @@ export default function App() {
     }
     if (activeTool === "watermark" && watermarkMode === "image" && !watermarkImageFile) {
       return "Choose a watermark image.";
+    }
+    if (activeTool === "redact" && redactionRegionCount === 0) {
+      return "Draw at least one redaction box on a page preview.";
     }
     return "";
   }
@@ -844,6 +910,16 @@ export default function App() {
           response = hasPaths
             ? await cropPdfPath(pathInputs, cropPayload, requestOptions)
             : await cropPdfUpload(uploadedFiles, cropPayload, requestOptions);
+        } else if (activeTool === "redact") {
+          const redactPayload = {
+            color: redactColor,
+            regions: Object.entries(redactRegions).flatMap(([page, regions]) =>
+              regions.map((region) => ({ page: Number(page), ...region }))
+            ),
+          };
+          response = hasPaths
+            ? await redactPdfPath(pathInputs, redactPayload, requestOptions)
+            : await redactPdfUpload(uploadedFiles, redactPayload, requestOptions);
         } else if (activeTool === "metadata") {
           const metadataPayload = {
             title: metadataForm.title,
@@ -879,6 +955,9 @@ export default function App() {
         setResult({ tool: activeTool, paths });
         pushHistoryEntry(activeTool, paths);
         setStatus(paths.length === 1 ? "Created 1 file" : `Created ${paths.length} files`);
+        if (activeTool === "redact") {
+          setPreviewTick((value) => value + 1);
+        }
       } catch (err) {
         if (err.name === "AbortError") {
           setStatus("Processing cancelled");
@@ -1089,8 +1168,17 @@ export default function App() {
           metadata={metadata}
           metadataForm={metadataForm}
           removeAllMetadata={removeAllMetadata}
+          redactColor={redactColor}
+          redactRegions={redactRegions}
+          activeRedactionPage={activeRedactionPage}
+          addRedactionRect={addRedactionRect}
+          removeRedactionRect={removeRedactionRect}
+          clearRedactionsForPage={clearRedactionsForPage}
+          clearAllRedactions={clearAllRedactions}
           setDropOverlayActive={setDropOverlayActive}
+          setActiveRedactionPage={setActiveRedactionPage}
           setReaderPageIndex={setReaderPageIndex}
+          setRedactColor={setRedactColor}
           setReorderDragPage={setReorderDragPage}
           setCrop={setCrop}
           setCropScope={setCropScope}

@@ -622,9 +622,27 @@ p {
   padding: 0.75rem;
 }
 
+.redact-editor {
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(246, 244, 244, 0.98));
+  border: 1px solid rgba(28, 28, 30, 0.08);
+  border-radius: 14px;
+  display: grid;
+  gap: 0.75rem;
+  min-height: 0;
+  overflow: hidden;
+  padding: 0.75rem;
+}
+
 .crop-editor-head {
   align-items: center;
   display: flex;
+  justify-content: space-between;
+}
+
+.redact-editor-head {
+  align-items: center;
+  display: flex;
+  gap: 0.6rem;
   justify-content: space-between;
 }
 
@@ -633,11 +651,25 @@ p {
   gap: 0.1rem;
 }
 
+.redact-editor-head div {
+  display: grid;
+  gap: 0.1rem;
+}
+
 .crop-editor-head strong {
   font-size: 0.88rem;
 }
 
+.redact-editor-head strong {
+  font-size: 0.88rem;
+}
+
 .crop-editor-head span {
+  color: var(--muted);
+  font-size: 0.74rem;
+}
+
+.redact-editor-head span {
   color: var(--muted);
   font-size: 0.74rem;
 }
@@ -707,6 +739,127 @@ p {
 .crop-controls {
   display: grid;
   gap: 0.8rem;
+}
+
+.redact-editor-body {
+  display: grid;
+  gap: 0.8rem;
+  grid-template-columns: minmax(220px, 0.9fr) minmax(220px, 0.7fr);
+  min-height: 0;
+  align-items: start;
+}
+
+.redact-preview-shell {
+  align-content: start;
+  background: rgba(245, 245, 247, 0.92);
+  border: 1px solid rgba(28, 28, 30, 0.08);
+  border-radius: 16px;
+  display: grid;
+  gap: 0.65rem;
+  min-height: 0;
+  min-width: 0;
+  padding: 0.75rem;
+}
+
+.redact-preview-page {
+  align-items: center;
+  background:
+    radial-gradient(circle at top, rgba(176, 39, 48, 0.08), transparent 35%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.99), rgba(246, 246, 248, 0.98));
+  border: 1px solid rgba(28, 28, 30, 0.1);
+  border-radius: 14px;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.6);
+  cursor: crosshair;
+  display: grid;
+  inline-size: min(100%, 360px);
+  justify-items: center;
+  margin: 0 auto;
+  min-height: 220px;
+  max-height: min(42vh, 380px);
+  overflow: hidden;
+  position: relative;
+  touch-action: none;
+}
+
+.redact-preview-page img {
+  display: block;
+  height: 100%;
+  inset: 0;
+  object-fit: contain;
+  position: absolute;
+  width: 100%;
+  z-index: 1;
+}
+
+.redact-preview-overlay {
+  inset: 0;
+  pointer-events: none;
+  position: absolute;
+  z-index: 3;
+}
+
+.redact-region {
+  background: rgba(18, 18, 18, 0.9);
+  border: 2px solid rgba(255, 255, 255, 0.72);
+  border-radius: 6px;
+  box-shadow: 0 12px 22px rgba(18, 18, 18, 0.24);
+  inset: auto;
+  min-height: 10px;
+  min-width: 10px;
+  opacity: 0.94;
+  padding: 0;
+  pointer-events: auto;
+  position: absolute;
+}
+
+.redact-region.is-draft {
+  background: rgba(176, 39, 48, 0.28);
+  border-color: rgba(176, 39, 48, 0.82);
+  box-shadow: 0 0 0 2px rgba(176, 39, 48, 0.08);
+  pointer-events: none;
+}
+
+.redact-controls {
+  display: grid;
+  gap: 0.8rem;
+}
+
+.redact-page-summary {
+  background: rgba(255, 255, 255, 0.76);
+  border: 1px solid rgba(28, 28, 30, 0.08);
+  border-radius: 14px;
+  display: grid;
+  gap: 0.55rem;
+  padding: 0.8rem;
+}
+
+.redact-page-summary strong {
+  font-size: 0.84rem;
+}
+
+.redact-page-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+}
+
+.redact-page-list button {
+  min-height: 32px;
+}
+
+.redact-page-list button.is-active {
+  background: linear-gradient(180deg, rgba(255, 242, 243, 0.98), rgba(255, 235, 237, 0.98));
+  border-color: rgba(176, 39, 48, 0.44);
+  color: var(--brand-dark);
+}
+
+.redact-page-list button span {
+  background: rgba(176, 39, 48, 0.1);
+  border-radius: 999px;
+  color: var(--brand-dark);
+  font-size: 0.72rem;
+  line-height: 1;
+  padding: 0.18rem 0.38rem;
 }
 
 .crop-grid {
@@ -1227,8 +1380,16 @@ p {
     grid-template-columns: 1fr;
   }
 
+  .redact-editor-body {
+    grid-template-columns: 1fr;
+  }
+
   .watermark-preview-page {
     inline-size: min(100%, 260px);
+  }
+
+  .redact-preview-page {
+    inline-size: min(100%, 300px);
   }
 }
 
@@ -1241,6 +1402,10 @@ p {
     max-height: none;
   }
 
+  .redact-preview-page {
+    max-height: min(34vh, 300px);
+  }
+
   .signature-report-head {
     align-items: stretch;
     flex-direction: column;
@@ -1249,6 +1414,10 @@ p {
 
 @media (max-width: 700px) {
   .watermark-editor {
+    padding: 0.65rem;
+  }
+
+  .redact-editor {
     padding: 0.65rem;
   }
 
@@ -1273,6 +1442,12 @@ p {
     inline-size: min(100%, 240px);
     min-height: 170px;
     max-height: min(28vh, 220px);
+  }
+
+  .redact-preview-page {
+    inline-size: min(100%, 240px);
+    min-height: 180px;
+    max-height: min(30vh, 240px);
   }
 
   .watermark-preview-text {

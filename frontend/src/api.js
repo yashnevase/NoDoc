@@ -337,6 +337,21 @@ export function cropPdfPath(paths, payload, options) {
   return postJson(`/organize/crop-pdf?${params.toString()}`, { input_paths: paths }, options);
 }
 
+export function redactPdfUpload(files, payload, options) {
+  return postUpload("/organize/redact-pdf-upload", files, {
+    regions: JSON.stringify(payload.regions || []),
+    color: payload.color || "#000000",
+  }, options);
+}
+
+export function redactPdfPath(paths, payload, options) {
+  return postJson("/organize/redact-pdf", {
+    input_paths: paths,
+    regions: payload.regions || [],
+    color: payload.color || "#000000",
+  }, options);
+}
+
 export function metadataViewPath(paths, options) {
   return postJson("/organize/metadata-view", { input_paths: paths }, options);
 }

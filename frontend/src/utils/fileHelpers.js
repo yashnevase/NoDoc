@@ -54,6 +54,9 @@ export function pageActionClass(toolId, selected, rotationApplies) {
   if (toolId === "rotate" && rotationApplies) {
     return "will-rotate";
   }
+  if (toolId === "redact" && selected) {
+    return "will-delete";
+  }
   if (toolId === "reorder") {
     return "will-reorder";
   }

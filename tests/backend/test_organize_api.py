@@ -8,6 +8,7 @@ from pathlib import Path
 import time
 
 import pikepdf
+import pypdfium2 as pdfium
 import pytest
 from fastapi.testclient import TestClient
 from PIL import Image
@@ -66,6 +67,17 @@ def page_content_bytes(path: Path) -> list[bytes]:
             streams = contents if isinstance(contents, pikepdf.Array) else [contents]
             pages.append(b"\n".join(stream.read_bytes() for stream in streams))
         return pages
+
+
+def render_page_rgb(path: Path, page_number: int = 1):
+    pdf = pdfium.PdfDocument(str(path))
+    try:
+        page = pdf[page_number - 1]
+        bitmap = page.render(scale=2).to_pil().convert("RGB")
+        page.close()
+        return bitmap
+    finally:
+        pdf.close()
 
 
 def make_image(path: Path, color: str) -> Path:
@@ -531,6 +543,50 @@ def test_metadata_upload_remove_all_succeeds_with_token(tmp_path: Path):
     output_path = Path(resp.json()["output_path"])
     with pikepdf.open(output_path) as pdf:
         assert len(pdf.docinfo.keys()) == 0
+
+
+def test_redact_pdf_path_succeeds_with_token(tmp_path: Path):
+    source = make_pdf(tmp_path / "redact.pdf", 2)
+    resp = client.post(
+        "/organize/redact-pdf",
+        json={
+            "input_paths": [str(source)],
+            "regions": [
+                {"page": 1, "x": 0.2, "y": 0.2, "width": 0.3, "height": 0.3},
+            ],
+            "color": "#000000",
+        },
+        headers={"x-privatepdf-token": settings.auth_token},
+    )
+
+    assert resp.status_code == 200
+    output_path = Path(resp.json()["output_path"])
+    with pikepdf.open(output_path) as pdf:
+        assert len(pdf.pages) == 2
+
+    with render_page_rgb(output_path, 1) as image:
+        pixel = image.getpixel((140, 140))
+        assert all(channel < 32 for channel in pixel)
+
+
+def test_redact_pdf_upload_succeeds_with_token(tmp_path: Path):
+    source = make_pdf(tmp_path / "redact-upload.pdf", 1)
+    with source.open("rb") as source_file:
+        resp = client.post(
+            "/organize/redact-pdf-upload",
+            files=[("files", ("redact-upload.pdf", source_file, "application/pdf"))],
+            data={
+                "regions": '[{"page": 1, "x": 0.35, "y": 0.35, "width": 0.25, "height": 0.25}]',
+                "color": "#111111",
+            },
+            headers={"x-privatepdf-token": settings.auth_token},
+        )
+
+    assert resp.status_code == 200
+    output_path = Path(resp.json()["output_path"])
+    with render_page_rgb(output_path, 1) as image:
+        pixel = image.getpixel((190, 190))
+        assert all(channel < 48 for channel in pixel)
 
 
 def test_watermark_text_upload_succeeds_with_token(tmp_path: Path):
