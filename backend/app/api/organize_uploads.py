@@ -21,13 +21,16 @@ from app.api.organize_helpers import (
 from app.api.organize_models import (
     ConvertResponse,
     CropRequest,
+    DrawStroke,
     JobAcceptedResponse,
     MergeResponse,
     MetadataRequest,
     MultiOutputResponse,
+    OcrTextResponse,
     PreviewManifestResponse,
     PreviewResponse,
     RedactionRegion,
+    SearchResponse,
     SignatureReport,
 )
 from app.services.organize_service import (
@@ -40,9 +43,13 @@ from app.services.organize_service import (
     create_upload_job_dir,
     delete_pages_file,
     duplicate_pages_file,
+    draw_pdf_file,
     extract_pages_file,
     images_to_pdf_files_to_output,
     inspect_signatures_file,
+    highlight_pdf_file,
+    ocr_text_file,
+    searchable_pdf_file,
     redact_pdf_file,
     read_metadata_file,
     merge_files_to_output,
@@ -52,6 +59,7 @@ from app.services.organize_service import (
     repair_pdf_file,
     reverse_pages_file,
     rotate_pdf_file,
+    search_text_file,
     safe_upload_output_path,
     write_metadata_file,
     split_pdf_file,
@@ -568,6 +576,103 @@ async def redact_pdf_upload(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
+@router.post("/highlight-pdf-upload", response_model=ConvertResponse | JobAcceptedResponse)
+async def highlight_pdf_upload(
+    files: list[UploadFile] = File(...),
+    regions: str = Form(...),
+    color: str = Form("#f2cd53"),
+    opacity: float = Form(0.34),
+    async_job: bool = False,
+) -> ConvertResponse | JobAcceptedResponse:
+    if len(files) != 1:
+        raise HTTPException(status_code=400, detail="highlight-pdf-upload expects exactly one PDF")
+
+    try:
+        parsed_regions = [RedactionRegion.model_validate(item).model_dump() for item in json.loads(regions)]
+    except (json.JSONDecodeError, ValueError, TypeError) as exc:
+        raise HTTPException(status_code=400, detail=f"invalid highlight payload: {exc}") from exc
+
+    job_dir = create_upload_job_dir()
+    try:
+        target_path = await save_upload(files[0], job_dir, "input.pdf")
+        if async_job:
+            return enqueue_job(
+                "highlight_pdf_upload",
+                lambda progress: {
+                    "output_path": str(
+                        highlight_pdf_file(
+                            target_path,
+                            regions=parsed_regions,
+                            color=color,
+                            opacity=opacity,
+                            on_progress=lambda value: progress(value, "Applying highlights"),
+                        )
+                    )
+                },
+            )
+        return convert_response(
+            highlight_pdf_file(
+                target_path,
+                regions=parsed_regions,
+                color=color,
+                opacity=opacity,
+            )
+        )
+    except PdfEngineError as exc:
+        cleanup_job_dir(job_dir)
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/draw-pdf-upload", response_model=ConvertResponse | JobAcceptedResponse)
+async def draw_pdf_upload(
+    files: list[UploadFile] = File(...),
+    strokes: str = Form(...),
+    color: str = Form("#b02730"),
+    opacity: float = Form(0.92),
+    thickness: float = Form(3.0),
+    async_job: bool = False,
+) -> ConvertResponse | JobAcceptedResponse:
+    if len(files) != 1:
+        raise HTTPException(status_code=400, detail="draw-pdf-upload expects exactly one PDF")
+
+    try:
+        parsed_strokes = [DrawStroke.model_validate(item).model_dump() for item in json.loads(strokes)]
+    except (json.JSONDecodeError, ValueError, TypeError) as exc:
+        raise HTTPException(status_code=400, detail=f"invalid draw payload: {exc}") from exc
+
+    job_dir = create_upload_job_dir()
+    try:
+        target_path = await save_upload(files[0], job_dir, "input.pdf")
+        if async_job:
+            return enqueue_job(
+                "draw_pdf_upload",
+                lambda progress: {
+                    "output_path": str(
+                        draw_pdf_file(
+                            target_path,
+                            strokes=parsed_strokes,
+                            color=color,
+                            opacity=opacity,
+                            thickness=thickness,
+                            on_progress=lambda value: progress(value, "Applying drawing"),
+                        )
+                    )
+                },
+            )
+        return convert_response(
+            draw_pdf_file(
+                target_path,
+                strokes=parsed_strokes,
+                color=color,
+                opacity=opacity,
+                thickness=thickness,
+            )
+        )
+    except PdfEngineError as exc:
+        cleanup_job_dir(job_dir)
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
 @router.post("/password-protect-upload", response_model=ConvertResponse | JobAcceptedResponse)
 async def password_protect_upload(files: list[UploadFile] = File(...), password: str = Form(...), async_job: bool = False) -> ConvertResponse | JobAcceptedResponse:
     if len(files) != 1:
@@ -596,6 +701,78 @@ async def signature_report_upload(files: list[UploadFile] = File(...)) -> Signat
     try:
         target_path = await save_upload(files[0], job_dir, "input.pdf")
         return signature_report_response(inspect_signatures_file(target_path))
+    except PdfEngineError as exc:
+        cleanup_job_dir(job_dir)
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/search-text-upload", response_model=SearchResponse)
+async def search_text_upload(files: list[UploadFile] = File(...), query: str = Form(...)) -> SearchResponse:
+    if len(files) != 1:
+        raise HTTPException(status_code=400, detail="search-text-upload expects exactly one input PDF")
+
+    job_dir = create_upload_job_dir()
+    try:
+        target_path = await save_upload(files[0], job_dir, "input.pdf")
+        return SearchResponse(**search_text_file(target_path, query))
+    except PdfEngineError as exc:
+        cleanup_job_dir(job_dir)
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/ocr-text-upload", response_model=OcrTextResponse | JobAcceptedResponse)
+async def ocr_text_upload(
+    files: list[UploadFile] = File(...),
+    lang: str = Form("eng"),
+    async_job: bool = False,
+) -> OcrTextResponse | JobAcceptedResponse:
+    if len(files) != 1:
+        raise HTTPException(status_code=400, detail="ocr-text-upload expects exactly one input PDF")
+
+    job_dir = create_upload_job_dir()
+    try:
+        target_path = await save_upload(files[0], job_dir, "input.pdf")
+        if async_job:
+            return enqueue_job(
+                "ocr_text_upload",
+                lambda progress: ocr_text_file(
+                    target_path,
+                    lang=lang,
+                    on_progress=lambda value: progress(value, "Running OCR"),
+                ),
+            )
+        return OcrTextResponse(**ocr_text_file(target_path, lang=lang))
+    except PdfEngineError as exc:
+        cleanup_job_dir(job_dir)
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/searchable-pdf-upload", response_model=ConvertResponse | JobAcceptedResponse)
+async def searchable_pdf_upload(
+    files: list[UploadFile] = File(...),
+    lang: str = Form("eng"),
+    async_job: bool = False,
+) -> ConvertResponse | JobAcceptedResponse:
+    if len(files) != 1:
+        raise HTTPException(status_code=400, detail="searchable-pdf-upload expects exactly one input PDF")
+
+    job_dir = create_upload_job_dir()
+    try:
+        target_path = await save_upload(files[0], job_dir, "input.pdf")
+        if async_job:
+            return enqueue_job(
+                "searchable_pdf_upload",
+                lambda progress: {
+                    "output_path": str(
+                        searchable_pdf_file(
+                            target_path,
+                            lang=lang,
+                            on_progress=lambda value: progress(value, "Building searchable PDF"),
+                        )
+                    )
+                },
+            )
+        return convert_response(searchable_pdf_file(target_path, lang=lang))
     except PdfEngineError as exc:
         cleanup_job_dir(job_dir)
         raise HTTPException(status_code=400, detail=str(exc)) from exc

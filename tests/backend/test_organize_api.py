@@ -28,6 +28,68 @@ def make_pdf(path: Path, n_pages: int = 1) -> Path:
     return path
 
 
+def make_text_pdf(path: Path, pages: list[str]) -> Path:
+    objects: list[bytes] = []
+    page_ids: list[int] = []
+    content_ids: list[int] = []
+    next_id = 3
+
+    for _ in pages:
+        page_ids.append(next_id)
+        next_id += 1
+    font_id = next_id
+    next_id += 1
+    for _ in pages:
+        content_ids.append(next_id)
+        next_id += 1
+
+    kids = " ".join(f"{page_id} 0 R" for page_id in page_ids)
+    objects.append(b"<< /Type /Catalog /Pages 2 0 R >>")
+    objects.append(f"<< /Type /Pages /Kids [{kids}] /Count {len(page_ids)} >>".encode("ascii"))
+
+    for index, text in enumerate(pages):
+        escaped_text = text.replace("\\", "\\\\").replace("(", "\\(").replace(")", "\\)")
+        page_obj = (
+            f"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 300 300] "
+            f"/Resources << /Font << /F1 {font_id} 0 R >> >> /Contents {content_ids[index]} 0 R >>"
+        ).encode("ascii")
+        objects.append(page_obj)
+
+    objects.append(b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>")
+
+    for text in pages:
+        escaped_text = text.replace("\\", "\\\\").replace("(", "\\(").replace(")", "\\)")
+        stream = f"BT /F1 18 Tf 36 240 Td ({escaped_text}) Tj ET".encode("latin-1")
+        content = (
+            f"<< /Length {len(stream)} >>\nstream\n".encode("ascii")
+            + stream
+            + b"\nendstream"
+        )
+        objects.append(content)
+
+    parts = [b"%PDF-1.4\n"]
+    offsets = [0]
+    for index, obj in enumerate(objects, start=1):
+        offsets.append(sum(len(part) for part in parts))
+        parts.append(f"{index} 0 obj\n".encode("ascii"))
+        parts.append(obj)
+        parts.append(b"\nendobj\n")
+
+    xref_offset = sum(len(part) for part in parts)
+    parts.append(f"xref\n0 {len(objects) + 1}\n".encode("ascii"))
+    parts.append(b"0000000000 65535 f \n")
+    for offset in offsets[1:]:
+        parts.append(f"{offset:010d} 00000 n \n".encode("ascii"))
+    parts.append(
+        (
+            f"trailer\n<< /Size {len(objects) + 1} /Root 1 0 R >>\n"
+            f"startxref\n{xref_offset}\n%%EOF\n"
+        ).encode("ascii")
+    )
+    path.write_bytes(b"".join(parts))
+    return path
+
+
 def make_sized_pdf(path: Path, sizes: list[tuple[int, int]]) -> Path:
     with pikepdf.new() as pdf:
         for size in sizes:
@@ -587,6 +649,187 @@ def test_redact_pdf_upload_succeeds_with_token(tmp_path: Path):
     with render_page_rgb(output_path, 1) as image:
         pixel = image.getpixel((190, 190))
         assert all(channel < 48 for channel in pixel)
+
+
+def test_highlight_pdf_path_succeeds_with_token(tmp_path: Path):
+    source = make_pdf(tmp_path / "highlight.pdf", 1)
+    resp = client.post(
+        "/organize/highlight-pdf",
+        json={
+            "input_paths": [str(source)],
+            "regions": [
+                {"page": 1, "x": 0.2, "y": 0.2, "width": 0.3, "height": 0.3},
+            ],
+            "color": "#f2cd53",
+            "opacity": 0.5,
+        },
+        headers={"x-privatepdf-token": settings.auth_token},
+    )
+
+    assert resp.status_code == 200
+    output_path = Path(resp.json()["output_path"])
+    with render_page_rgb(output_path, 1) as image:
+        pixel = image.getpixel((140, 140))
+        assert pixel[0] > 220
+        assert pixel[1] > 190
+        assert pixel[2] < 170
+
+
+def test_highlight_pdf_upload_succeeds_with_token(tmp_path: Path):
+    source = make_pdf(tmp_path / "highlight-upload.pdf", 1)
+    with source.open("rb") as source_file:
+        resp = client.post(
+            "/organize/highlight-pdf-upload",
+            files=[("files", ("highlight-upload.pdf", source_file, "application/pdf"))],
+            data={
+                "regions": '[{"page": 1, "x": 0.3, "y": 0.3, "width": 0.2, "height": 0.2}]',
+                "color": "#ffe066",
+                "opacity": "0.45",
+            },
+            headers={"x-privatepdf-token": settings.auth_token},
+        )
+
+    assert resp.status_code == 200
+    output_path = Path(resp.json()["output_path"])
+    with render_page_rgb(output_path, 1) as image:
+        pixel = image.getpixel((160, 160))
+        assert pixel[0] > 220
+        assert pixel[1] > 200
+
+
+def test_draw_pdf_path_succeeds_with_token(tmp_path: Path):
+    source = make_pdf(tmp_path / "draw.pdf", 1)
+    resp = client.post(
+        "/organize/draw-pdf",
+        json={
+            "input_paths": [str(source)],
+            "strokes": [
+                {
+                    "page": 1,
+                    "points": [
+                        {"x": 0.2, "y": 0.2},
+                        {"x": 0.5, "y": 0.5},
+                    ],
+                },
+            ],
+            "color": "#b02730",
+            "opacity": 1.0,
+            "thickness": 6,
+        },
+        headers={"x-privatepdf-token": settings.auth_token},
+    )
+
+    assert resp.status_code == 200
+    output_path = Path(resp.json()["output_path"])
+    pages = page_content_bytes(output_path)
+    assert b"0.690 0.153 0.188 RG" in pages[0]
+    assert b"6.00 w" in pages[0]
+    assert b"40.00 160.00 m" in pages[0]
+    assert b"100.00 100.00 l" in pages[0]
+
+
+def test_draw_pdf_upload_succeeds_with_token(tmp_path: Path):
+    source = make_pdf(tmp_path / "draw-upload.pdf", 1)
+    with source.open("rb") as source_file:
+        resp = client.post(
+            "/organize/draw-pdf-upload",
+            files=[("files", ("draw-upload.pdf", source_file, "application/pdf"))],
+            data={
+                "strokes": '[{"page": 1, "points": [{"x": 0.3, "y": 0.3}, {"x": 0.6, "y": 0.35}, {"x": 0.7, "y": 0.5}]}]',
+                "color": "#202020",
+                "opacity": "1.0",
+                "thickness": "8",
+            },
+            headers={"x-privatepdf-token": settings.auth_token},
+        )
+
+    assert resp.status_code == 200
+    output_path = Path(resp.json()["output_path"])
+    pages = page_content_bytes(output_path)
+    assert b"0.125 0.125 0.125 RG" in pages[0]
+    assert b"8.00 w" in pages[0]
+    assert b"60.00 140.00 m" in pages[0]
+    assert b"140.00 100.00 l" in pages[0]
+
+
+def test_search_text_path_succeeds_with_token(tmp_path: Path):
+    source = make_text_pdf(tmp_path / "search-text.pdf", ["Hello NoDoc Search", "Second page keyword"])
+    resp = client.post(
+        "/organize/search-text",
+        json={"input_paths": [str(source)], "query": "search"},
+        headers={"x-privatepdf-token": settings.auth_token},
+    )
+
+    assert resp.status_code == 200
+    payload = resp.json()
+    assert payload["total_matches"] == 1
+    assert payload["pages_with_matches"] == 1
+    assert payload["matches"][0]["page"] == 1
+    assert "NoDoc Search" in payload["matches"][0]["snippet"]
+
+
+def test_search_text_upload_succeeds_with_token(tmp_path: Path):
+    source = make_text_pdf(tmp_path / "search-upload.pdf", ["Alpha beta", "Alpha again"])
+    with source.open("rb") as source_file:
+        resp = client.post(
+            "/organize/search-text-upload",
+            files=[("files", ("search-upload.pdf", source_file, "application/pdf"))],
+            data={"query": "alpha"},
+            headers={"x-privatepdf-token": settings.auth_token},
+        )
+
+    assert resp.status_code == 200
+    payload = resp.json()
+    assert payload["total_matches"] == 2
+    assert payload["pages_with_matches"] == 2
+
+
+def test_ocr_text_path_succeeds_with_token(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    source = make_pdf(tmp_path / "ocr-text.pdf", 2)
+
+    def fake_ocr_text_file(input_path: Path, *, lang: str = "eng", on_progress=None):
+        output_path = input_path.parent / "processed" / "ocr-text_ocr.txt"
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_text("Recognized text", encoding="utf-8")
+        return {"output_path": str(output_path), "text": "Recognized text", "page_count": 2}
+
+    monkeypatch.setattr("app.api.organize_paths.ocr_text_file", fake_ocr_text_file)
+    resp = client.post(
+        "/organize/ocr-text",
+        json={"input_paths": [str(source)], "lang": "eng"},
+        headers={"x-privatepdf-token": settings.auth_token},
+    )
+
+    assert resp.status_code == 200
+    payload = resp.json()
+    assert payload["text"] == "Recognized text"
+    assert payload["page_count"] == 2
+    assert payload["output_path"].endswith(".txt")
+
+
+def test_searchable_pdf_upload_succeeds_with_token(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    source = make_pdf(tmp_path / "searchable.pdf", 1)
+
+    def fake_searchable_pdf_file(input_path: Path, *, lang: str = "eng", on_progress=None):
+        output_path = input_path.parent / "processed" / "searchable_searchable.pdf"
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        with pikepdf.new() as pdf:
+            pdf.add_blank_page(page_size=(200, 200))
+            pdf.save(output_path)
+        return output_path
+
+    monkeypatch.setattr("app.api.organize_uploads.searchable_pdf_file", fake_searchable_pdf_file)
+    with source.open("rb") as source_file:
+        resp = client.post(
+            "/organize/searchable-pdf-upload",
+            files=[("files", ("searchable.pdf", source_file, "application/pdf"))],
+            data={"lang": "eng"},
+            headers={"x-privatepdf-token": settings.auth_token},
+        )
+
+    assert resp.status_code == 200
+    payload = resp.json()
+    assert payload["output_path"].endswith(".pdf")
 
 
 def test_watermark_text_upload_succeeds_with_token(tmp_path: Path):

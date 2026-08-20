@@ -352,6 +352,42 @@ export function redactPdfPath(paths, payload, options) {
   }, options);
 }
 
+export function highlightPdfUpload(files, payload, options) {
+  return postUpload("/organize/highlight-pdf-upload", files, {
+    regions: JSON.stringify(payload.regions || []),
+    color: payload.color || "#f2cd53",
+    opacity: payload.opacity ?? 0.34,
+  }, options);
+}
+
+export function highlightPdfPath(paths, payload, options) {
+  return postJson("/organize/highlight-pdf", {
+    input_paths: paths,
+    regions: payload.regions || [],
+    color: payload.color || "#f2cd53",
+    opacity: payload.opacity ?? 0.34,
+  }, options);
+}
+
+export function drawPdfUpload(files, payload, options) {
+  return postUpload("/organize/draw-pdf-upload", files, {
+    strokes: JSON.stringify(payload.strokes || []),
+    color: payload.color || "#b02730",
+    opacity: payload.opacity ?? 0.92,
+    thickness: payload.thickness ?? 3,
+  }, options);
+}
+
+export function drawPdfPath(paths, payload, options) {
+  return postJson("/organize/draw-pdf", {
+    input_paths: paths,
+    strokes: payload.strokes || [],
+    color: payload.color || "#b02730",
+    opacity: payload.opacity ?? 0.92,
+    thickness: payload.thickness ?? 3,
+  }, options);
+}
+
 export function metadataViewPath(paths, options) {
   return postJson("/organize/metadata-view", { input_paths: paths }, options);
 }
@@ -366,6 +402,30 @@ export function metadataViewUpload(files, options) {
 
 export function metadataUpload(files, payload, options) {
   return postUpload("/organize/metadata-upload", files, payload, options);
+}
+
+export function searchTextPath(paths, query, options) {
+  return postJson("/organize/search-text", { input_paths: paths, query }, options);
+}
+
+export function searchTextUpload(files, query, options) {
+  return postUpload("/organize/search-text-upload", files, { query }, options);
+}
+
+export function ocrTextPath(paths, lang, options) {
+  return postJson("/organize/ocr-text", { input_paths: paths, lang }, options);
+}
+
+export function ocrTextUpload(files, lang, options) {
+  return postUpload("/organize/ocr-text-upload", files, { lang }, options);
+}
+
+export function searchablePdfPath(paths, lang, options) {
+  return postJson("/organize/searchable-pdf", { input_paths: paths, lang }, options);
+}
+
+export function searchablePdfUpload(files, lang, options) {
+  return postUpload("/organize/searchable-pdf-upload", files, { lang }, options);
 }
 
 export function passwordProtectUpload(files, password, options) {

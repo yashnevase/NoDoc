@@ -35,6 +35,8 @@ import {
   passwordProtectUpload,
   pdfToImagesPath,
   pdfToImagesUpload,
+  ocrTextPath,
+  ocrTextUpload,
   pickFilesDialog,
   pickFolderDialog,
   pickSavePathDialog,
@@ -50,6 +52,10 @@ import {
   cropPdfUpload,
   compressPdfPath,
   compressPdfUpload,
+  drawPdfPath,
+  drawPdfUpload,
+  highlightPdfPath,
+  highlightPdfUpload,
   redactPdfPath,
   redactPdfUpload,
   metadataPath,
@@ -65,6 +71,10 @@ import {
   rotatePdfUpload,
   signatureReportPath,
   signatureReportUpload,
+  searchablePdfPath,
+  searchablePdfUpload,
+  searchTextPath,
+  searchTextUpload,
   splitPdfPath,
   splitPdfUpload,
   watermarkImagePath,
@@ -107,6 +117,15 @@ export default function App() {
   const [compressPreset, setCompressPreset] = useState("balanced");
   const [cropScope, setCropScope] = useState("selected");
   const [crop, setCrop] = useState({ left: 0, top: 0, right: 0, bottom: 0 });
+  const [drawStrokes, setDrawStrokes] = useState({});
+  const [drawColor, setDrawColor] = useState("#b02730");
+  const [drawOpacity, setDrawOpacity] = useState(0.92);
+  const [drawThickness, setDrawThickness] = useState(3);
+  const [activeDrawPage, setActiveDrawPage] = useState(null);
+  const [highlightRegions, setHighlightRegions] = useState({});
+  const [highlightColor, setHighlightColor] = useState("#f2cd53");
+  const [highlightOpacity, setHighlightOpacity] = useState(0.34);
+  const [activeHighlightPage, setActiveHighlightPage] = useState(null);
   const [redactRegions, setRedactRegions] = useState({});
   const [redactColor, setRedactColor] = useState("#121212");
   const [activeRedactionPage, setActiveRedactionPage] = useState(null);
@@ -133,6 +152,13 @@ export default function App() {
   const [watermarkImagePreview, setWatermarkImagePreview] = useState("");
   const [signatureReport, setSignatureReport] = useState(null);
   const [signatureBusy, setSignatureBusy] = useState(false);
+  const [ocrLanguage, setOcrLanguage] = useState("eng");
+  const [ocrTextPreview, setOcrTextPreview] = useState("");
+  const [ocrPageCount, setOcrPageCount] = useState(0);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchResults, setSearchResults] = useState([]);
+  const [searchSummary, setSearchSummary] = useState("");
+  const [searchBusy, setSearchBusy] = useState(false);
   const [status, setStatus] = useState("Ready");
   const [result, setResult] = useState(null);
   const [busyLabel, setBusyLabel] = useState("");
@@ -156,7 +182,9 @@ export default function App() {
   const previewScrollRef = useRef(null);
   const previewAbortRef = useRef(null);
   const signatureAbortRef = useRef(null);
+  const searchAbortRef = useRef(null);
   const actionAbortRef = useRef(null);
+  const ocrEngineHint = "Install Tesseract or set PRIVATEPDF_TESSERACT_PATH to enable OCR on this machine.";
 
   const activeTools = groups.find((group) => group.id === activeGroup)?.tools || [];
   const activeToolInfo = groups.flatMap((group) => group.tools).find((tool) => tool.id === activeTool);
@@ -198,14 +226,18 @@ export default function App() {
   const isBusy = Boolean(busyLabel);
   const showCancelAction = isBusy || previewBusy;
   const readerActive = activeTool === "reader";
-  const pageToolActive = ["extract", "delete", "rotate", "watermark", "duplicate", "crop", "metadata", "redact"].includes(activeTool);
+  const pageToolActive = ["extract", "delete", "rotate", "watermark", "sign", "text", "duplicate", "crop", "metadata", "redact", "highlight", "draw"].includes(activeTool);
   const reorderActive = activeTool === "reorder";
   const watermarkAllPages = activeTool === "watermark" && watermarkScope === "all";
+  const signAllPages = activeTool === "sign" && watermarkScope === "all";
+  const textAllPages = activeTool === "text" && watermarkScope === "all";
   const cropAllPages = activeTool === "crop" && cropScope === "all";
   const reorderChanged = pagePreview.length > 0 && pagePreview.some((page, index) => page.page !== index + 1);
   const rotateAppliesToAll = activeTool === "rotate" && rotateScope === "all";
+  const drawStrokeCount = Object.values(drawStrokes).reduce((sum, strokes) => sum + strokes.length, 0);
+  const highlightRegionCount = Object.values(highlightRegions).reduce((sum, regions) => sum + regions.length, 0);
   const redactionRegionCount = Object.values(redactRegions).reduce((sum, regions) => sum + regions.length, 0);
-  const pageSelectionLocked = rotateAppliesToAll || watermarkAllPages || cropAllPages;
+  const pageSelectionLocked = rotateAppliesToAll || watermarkAllPages || signAllPages || textAllPages || cropAllPages;
   const selectionLabel = pageToolActive && pagePreview.length
     ? pageSelectionLocked
       ? `${pagePreview.length}/${pagePreview.length} selected`
@@ -349,6 +381,16 @@ export default function App() {
     };
   }, [pageDragMode]);
 
+  useEffect(() => {
+    searchAbortRef.current?.abort();
+    setSearchQuery("");
+    setSearchResults([]);
+    setSearchSummary("");
+    setSearchBusy(false);
+    setOcrTextPreview("");
+    setOcrPageCount(0);
+  }, [previewSourceKey, exactlyOnePdfSelected]);
+
   function loadPathItems(paths, statusMessage) {
     const cleanPaths = (paths || []).filter(Boolean);
     if (!cleanPaths.length) {
@@ -363,6 +405,15 @@ export default function App() {
     setPreviewSessionId("");
     setSignatureReport(null);
     setSignatureBusy(false);
+    searchAbortRef.current?.abort();
+    setSearchQuery("");
+    setSearchResults([]);
+    setSearchSummary("");
+    setSearchBusy(false);
+    setDrawStrokes({});
+    setActiveDrawPage(null);
+    setHighlightRegions({});
+    setActiveHighlightPage(null);
     setRedactRegions({});
     setActiveRedactionPage(null);
     setReorderDragPage(null);
@@ -375,8 +426,19 @@ export default function App() {
     const nextItems = uploadItems(files);
     setFileItems(nextItems);
     setResult(null);
+    setDrawStrokes({});
+    setActiveDrawPage(null);
+    setHighlightRegions({});
+    setActiveHighlightPage(null);
     setRedactRegions({});
     setActiveRedactionPage(null);
+    searchAbortRef.current?.abort();
+    setSearchQuery("");
+    setSearchResults([]);
+    setSearchSummary("");
+    setSearchBusy(false);
+    setOcrTextPreview("");
+    setOcrPageCount(0);
     rememberRecentFiles(nextItems.map((item) => item.name));
     setStatus("Files loaded");
   }
@@ -395,8 +457,19 @@ export default function App() {
         const nextItems = pathItems(paths);
         setFileItems(nextItems);
         setResult(null);
+        setDrawStrokes({});
+        setActiveDrawPage(null);
+        setHighlightRegions({});
+        setActiveHighlightPage(null);
         setRedactRegions({});
         setActiveRedactionPage(null);
+        searchAbortRef.current?.abort();
+        setSearchQuery("");
+        setSearchResults([]);
+        setSearchSummary("");
+        setSearchBusy(false);
+        setOcrTextPreview("");
+        setOcrPageCount(0);
         rememberRecentFiles(nextItems.map((item) => item.name));
         setStatus(`Opened ${nextItems.length} file${nextItems.length === 1 ? "" : "s"}`);
         return;
@@ -421,6 +494,7 @@ export default function App() {
     previewAbortRef.current?.abort();
     signatureAbortRef.current?.abort();
     actionAbortRef.current?.abort();
+    searchAbortRef.current?.abort();
     setFileItems([]);
     setResult(null);
     setSelectedPages([]);
@@ -428,6 +502,16 @@ export default function App() {
     setPreviewSessionId("");
     setSignatureReport(null);
     setSignatureBusy(false);
+    setSearchQuery("");
+    setSearchResults([]);
+    setSearchSummary("");
+    setSearchBusy(false);
+    setOcrTextPreview("");
+    setOcrPageCount(0);
+    setDrawStrokes({});
+    setActiveDrawPage(null);
+    setHighlightRegions({});
+    setActiveHighlightPage(null);
     setRedactRegions({});
     setActiveRedactionPage(null);
     setBusyLabel("");
@@ -478,11 +562,34 @@ export default function App() {
     if (tool.id !== "watermark") {
       setWatermarkScope("selected");
     }
+    if (tool.id === "sign") {
+      setWatermarkMode("image");
+      setWatermarkScope("selected");
+      setWatermarkPosition("bottom-right");
+      setWatermarkAngle(0);
+      setWatermarkSize(42);
+      setWatermarkOpacity(0.9);
+    }
+    if (tool.id === "text") {
+      setWatermarkMode("text");
+      setWatermarkPreset("verified");
+      setWatermarkScope("selected");
+      setWatermarkPosition("center");
+      setWatermarkAngle(0);
+      setWatermarkSize(28);
+      setWatermarkOpacity(1);
+    }
     if (tool.id !== "digital_sign") {
       setSignatureReport(null);
     }
-    if (!["extract", "delete", "rotate", "watermark", "duplicate", "page_numbers"].includes(tool.id)) {
+    if (!["extract", "delete", "rotate", "watermark", "text", "duplicate", "page_numbers"].includes(tool.id)) {
       setSelectedPages([]);
+    }
+    if (tool.id !== "draw") {
+      setActiveDrawPage(null);
+    }
+    if (tool.id !== "highlight") {
+      setActiveHighlightPage(null);
     }
     if (tool.id !== "redact") {
       setActiveRedactionPage(null);
@@ -527,6 +634,28 @@ export default function App() {
     setStatus(`Redaction box added on page ${pageNumber}`);
   }
 
+  function addHighlightRect(pageNumber, rect) {
+    setHighlightRegions((current) => ({
+      ...current,
+      [pageNumber]: [...(current[pageNumber] || []), rect],
+    }));
+    setActiveHighlightPage(pageNumber);
+    setSelectedPages([pageNumber]);
+    setResult(null);
+    setStatus(`Highlight added on page ${pageNumber}`);
+  }
+
+  function addDrawStroke(pageNumber, points) {
+    setDrawStrokes((current) => ({
+      ...current,
+      [pageNumber]: [...(current[pageNumber] || []), { points }],
+    }));
+    setActiveDrawPage(pageNumber);
+    setSelectedPages([pageNumber]);
+    setResult(null);
+    setStatus(`Drawing added on page ${pageNumber}`);
+  }
+
   function removeRedactionRect(pageNumber, indexToRemove) {
     setRedactRegions((current) => {
       const next = { ...current };
@@ -560,6 +689,76 @@ export default function App() {
     setRedactRegions({});
     setResult(null);
     setStatus("All redaction boxes cleared");
+  }
+
+  function removeHighlightRect(pageNumber, indexToRemove) {
+    setHighlightRegions((current) => {
+      const next = { ...current };
+      const pageRects = [...(next[pageNumber] || [])];
+      pageRects.splice(indexToRemove, 1);
+      if (pageRects.length) {
+        next[pageNumber] = pageRects;
+      } else {
+        delete next[pageNumber];
+      }
+      return next;
+    });
+    setResult(null);
+    setStatus(`Highlight removed from page ${pageNumber}`);
+  }
+
+  function clearHighlightsForPage(pageNumber) {
+    setHighlightRegions((current) => {
+      if (!current[pageNumber]?.length) {
+        return current;
+      }
+      const next = { ...current };
+      delete next[pageNumber];
+      return next;
+    });
+    setResult(null);
+    setStatus(`Highlights cleared for page ${pageNumber}`);
+  }
+
+  function clearAllHighlights() {
+    setHighlightRegions({});
+    setResult(null);
+    setStatus("All highlight boxes cleared");
+  }
+
+  function removeLastDrawStroke(pageNumber) {
+    setDrawStrokes((current) => {
+      const next = { ...current };
+      const pageStrokes = [...(next[pageNumber] || [])];
+      pageStrokes.pop();
+      if (pageStrokes.length) {
+        next[pageNumber] = pageStrokes;
+      } else {
+        delete next[pageNumber];
+      }
+      return next;
+    });
+    setResult(null);
+    setStatus(`Last drawing stroke removed from page ${pageNumber}`);
+  }
+
+  function clearDrawStrokesForPage(pageNumber) {
+    setDrawStrokes((current) => {
+      if (!current[pageNumber]?.length) {
+        return current;
+      }
+      const next = { ...current };
+      delete next[pageNumber];
+      return next;
+    });
+    setResult(null);
+    setStatus(`Drawing cleared for page ${pageNumber}`);
+  }
+
+  function clearAllDrawStrokes() {
+    setDrawStrokes({});
+    setResult(null);
+    setStatus("All drawing strokes cleared");
   }
 
   function setPageSelection(pageNumber, shouldSelect) {
@@ -693,6 +892,69 @@ export default function App() {
     }
   }
 
+  async function runReaderSearch() {
+    const query = searchQuery.trim();
+    if (!query) {
+      setSearchResults([]);
+      setSearchSummary("");
+      setStatus("Enter text to search.");
+      return;
+    }
+    if (!exactlyOnePdfSelected || mixedSources) {
+      setStatus("Select exactly one PDF to search.");
+      return;
+    }
+
+    searchAbortRef.current?.abort();
+    const controller = new AbortController();
+    searchAbortRef.current = controller;
+    setSearchBusy(true);
+    setStatus(`Searching for "${query}"...`);
+    try {
+      const response = hasPaths
+        ? await searchTextPath(pathInputs, query, { signal: controller.signal })
+        : await searchTextUpload(uploadedFiles, query, { signal: controller.signal });
+      const matches = response.matches || [];
+      setSearchResults(matches);
+      setSearchSummary(
+        matches.length
+          ? `${response.total_matches} match${response.total_matches === 1 ? "" : "es"} on ${response.pages_with_matches} page${response.pages_with_matches === 1 ? "" : "s"}`
+          : "No matches"
+      );
+      if (matches.length > 0) {
+        setReaderPageIndex(Math.max(0, matches[0].page - 1));
+        setStatus(`Found ${response.total_matches} match${response.total_matches === 1 ? "" : "es"}`);
+      } else {
+        setStatus("No matching text found.");
+      }
+    } catch (err) {
+      if (err.name === "AbortError") {
+        setStatus("Search cancelled");
+        return;
+      }
+      setStatus(`Search error: ${err.message}`);
+    } finally {
+      if (searchAbortRef.current === controller) {
+        searchAbortRef.current = null;
+      }
+      setSearchBusy(false);
+    }
+  }
+
+  function clearReaderSearch() {
+    searchAbortRef.current?.abort();
+    setSearchQuery("");
+    setSearchResults([]);
+    setSearchSummary("");
+    setSearchBusy(false);
+    setStatus("Search cleared");
+  }
+
+  function openSearchResult(pageNumber) {
+    setReaderPageIndex(Math.max(0, pageNumber - 1));
+    setStatus(`Opened page ${pageNumber}`);
+  }
+
   function assertReady() {
     if (!readyToolIds.has(activeTool)) {
       return `${activeToolInfo?.title || "This tool"} is planned for later.`;
@@ -706,7 +968,7 @@ export default function App() {
     if (activeTool === "images" && !allSelectedAreImages) {
       return "Select one or more image files.";
     }
-  if (["reader", "split", "render", "extract", "delete", "rotate", "reorder", "compress", "password", "repair", "watermark", "digital_sign", "page_numbers", "crop", "metadata", "redact"].includes(activeTool) && !exactlyOnePdfSelected) {
+  if (["reader", "split", "render", "extract", "delete", "rotate", "reorder", "compress", "password", "repair", "watermark", "sign", "text", "digital_sign", "page_numbers", "crop", "metadata", "redact", "highlight", "draw", "image_text", "searchable"].includes(activeTool) && !exactlyOnePdfSelected) {
       return "Select exactly one PDF file.";
     }
     if (["extract", "delete", "duplicate", "crop"].includes(activeTool) && selectedPages.length === 0) {
@@ -724,11 +986,26 @@ export default function App() {
     if (activeTool === "watermark" && watermarkScope === "selected" && selectedPages.length === 0) {
       return "Pick pages to watermark or switch to All pages.";
     }
+    if (activeTool === "text" && watermarkScope === "selected" && selectedPages.length === 0) {
+      return "Pick pages for the text stamp or switch to All pages.";
+    }
     if (activeTool === "watermark" && watermarkMode === "text" && !watermarkText.trim()) {
       return "Enter watermark text.";
     }
+    if (activeTool === "text" && !watermarkText.trim()) {
+      return "Enter text to place on the page.";
+    }
     if (activeTool === "watermark" && watermarkMode === "image" && !watermarkImageFile) {
       return "Choose a watermark image.";
+    }
+    if (activeTool === "sign" && !watermarkImageFile) {
+      return "Choose a signature image.";
+    }
+    if (activeTool === "draw" && drawStrokeCount === 0) {
+      return "Draw at least one pen stroke on a page preview.";
+    }
+    if (activeTool === "highlight" && highlightRegionCount === 0) {
+      return "Draw at least one highlight box on a page preview.";
     }
     if (activeTool === "redact" && redactionRegionCount === 0) {
       return "Draw at least one redaction box on a page preview.";
@@ -833,6 +1110,8 @@ export default function App() {
             ? ""
             : activeTool === "watermark" && watermarkScope === "all"
               ? ""
+              : activeTool === "text" && watermarkScope === "all"
+              ? ""
               : pagesToRange(selectedPages);
 
         if (activeTool === "merge") {
@@ -843,6 +1122,10 @@ export default function App() {
           response = hasPaths ? await splitPdfPath(pathInputs, requestOptions) : await splitPdfUpload(uploadedFiles, requestOptions);
         } else if (activeTool === "render") {
           response = hasPaths ? await pdfToImagesPath(pathInputs, requestOptions) : await pdfToImagesUpload(uploadedFiles, requestOptions);
+        } else if (activeTool === "image_text") {
+          response = hasPaths
+            ? await ocrTextPath(pathInputs, ocrLanguage, requestOptions)
+            : await ocrTextUpload(uploadedFiles, ocrLanguage, requestOptions);
         } else if (activeTool === "extract") {
           response = hasPaths ? await extractPagesPath(pathInputs, pageRange, requestOptions) : await extractPagesUpload(uploadedFiles, pageRange, requestOptions);
         } else if (activeTool === "delete") {
@@ -899,6 +1182,55 @@ export default function App() {
             : hasPaths
               ? await watermarkTextPath(pathInputs, watermarkPayload, requestOptions)
               : await watermarkTextUpload(uploadedFiles, watermarkPayload, requestOptions);
+        } else if (activeTool === "sign") {
+          const signPayload = {
+            pages: pageRange,
+            position: watermarkPosition,
+            angle: watermarkAngle,
+            size: watermarkSize,
+            opacity: watermarkOpacity,
+          };
+          response = hasPaths
+            ? await watermarkImagePath(pathInputs, watermarkImageFile, signPayload, requestOptions)
+            : await watermarkImageUpload(uploadedFiles, watermarkImageFile, signPayload, requestOptions);
+        } else if (activeTool === "text") {
+          const textPayload = {
+            text: watermarkText,
+            mode: "text",
+            preset: "verified",
+            pages: pageRange,
+            position: watermarkPosition,
+            angle: watermarkAngle,
+            size: watermarkSize,
+            opacity: watermarkOpacity,
+            color: watermarkColor,
+          };
+          response = hasPaths
+            ? await watermarkTextPath(pathInputs, textPayload, requestOptions)
+            : await watermarkTextUpload(uploadedFiles, textPayload, requestOptions);
+        } else if (activeTool === "draw") {
+          const drawPayload = {
+            color: drawColor,
+            opacity: drawOpacity,
+            thickness: drawThickness,
+            strokes: Object.entries(drawStrokes).flatMap(([page, strokes]) =>
+              strokes.map((stroke) => ({ page: Number(page), points: stroke.points }))
+            ),
+          };
+          response = hasPaths
+            ? await drawPdfPath(pathInputs, drawPayload, requestOptions)
+            : await drawPdfUpload(uploadedFiles, drawPayload, requestOptions);
+        } else if (activeTool === "highlight") {
+          const highlightPayload = {
+            color: highlightColor,
+            opacity: highlightOpacity,
+            regions: Object.entries(highlightRegions).flatMap(([page, regions]) =>
+              regions.map((region) => ({ page: Number(page), ...region }))
+            ),
+          };
+          response = hasPaths
+            ? await highlightPdfPath(pathInputs, highlightPayload, requestOptions)
+            : await highlightPdfUpload(uploadedFiles, highlightPayload, requestOptions);
         } else if (activeTool === "crop") {
           const cropPayload = {
             pages: pageRange,
@@ -920,6 +1252,10 @@ export default function App() {
           response = hasPaths
             ? await redactPdfPath(pathInputs, redactPayload, requestOptions)
             : await redactPdfUpload(uploadedFiles, redactPayload, requestOptions);
+        } else if (activeTool === "searchable") {
+          response = hasPaths
+            ? await searchablePdfPath(pathInputs, ocrLanguage, requestOptions)
+            : await searchablePdfUpload(uploadedFiles, ocrLanguage, requestOptions);
         } else if (activeTool === "metadata") {
           const metadataPayload = {
             title: metadataForm.title,
@@ -951,11 +1287,16 @@ export default function App() {
           response = await waitForJob(response.job_id, signal);
         }
 
+        if (activeTool === "image_text") {
+          setOcrTextPreview(response.text || "");
+          setOcrPageCount(response.page_count || 0);
+        }
+
         const paths = outputPathsFromResult(response);
         setResult({ tool: activeTool, paths });
         pushHistoryEntry(activeTool, paths);
         setStatus(paths.length === 1 ? "Created 1 file" : `Created ${paths.length} files`);
-        if (activeTool === "redact") {
+        if (activeTool === "sign" || activeTool === "draw" || activeTool === "highlight" || activeTool === "redact") {
           setPreviewTick((value) => value + 1);
         }
       } catch (err) {
@@ -1133,6 +1474,10 @@ export default function App() {
           currentReaderIndex={currentReaderIndex}
           currentReaderPage={currentReaderPage}
           dragDepthRef={dragDepthRef}
+          drawColor={drawColor}
+          drawOpacity={drawOpacity}
+          drawStrokes={drawStrokes}
+          drawThickness={drawThickness}
           endPageDragSelection={endPageDragSelection}
           exactlyOnePdfSelected={exactlyOnePdfSelected}
           fileItems={fileItems}
@@ -1153,6 +1498,10 @@ export default function App() {
           readerPageLabel={readerPageLabel}
           readerPaperStyle={readerPaperStyle}
           readerZoom={readerZoom}
+          searchBusy={searchBusy}
+          searchQuery={searchQuery}
+          searchResults={searchResults}
+          searchSummary={searchSummary}
           reorderActive={reorderActive}
           reorderChanged={reorderChanged}
           reorderDragPage={reorderDragPage}
@@ -1164,20 +1513,46 @@ export default function App() {
           selectionLabel={selectionLabel}
           crop={crop}
           cropScope={cropScope}
+          highlightColor={highlightColor}
+          highlightOpacity={highlightOpacity}
+          highlightRegions={highlightRegions}
           loadMetadata={loadMetadata}
           metadata={metadata}
           metadataForm={metadataForm}
+          ocrEngineHint={ocrEngineHint}
+          ocrLanguage={ocrLanguage}
+          ocrPageCount={ocrPageCount}
+          ocrTextPreview={ocrTextPreview}
           removeAllMetadata={removeAllMetadata}
           redactColor={redactColor}
           redactRegions={redactRegions}
+          activeDrawPage={activeDrawPage}
+          activeHighlightPage={activeHighlightPage}
           activeRedactionPage={activeRedactionPage}
+          addDrawStroke={addDrawStroke}
+          addHighlightRect={addHighlightRect}
           addRedactionRect={addRedactionRect}
+          removeLastDrawStroke={removeLastDrawStroke}
+          removeHighlightRect={removeHighlightRect}
+          clearDrawStrokesForPage={clearDrawStrokesForPage}
+          clearAllDrawStrokes={clearAllDrawStrokes}
+          clearHighlightsForPage={clearHighlightsForPage}
+          clearAllHighlights={clearAllHighlights}
           removeRedactionRect={removeRedactionRect}
           clearRedactionsForPage={clearRedactionsForPage}
           clearAllRedactions={clearAllRedactions}
           setDropOverlayActive={setDropOverlayActive}
+          setActiveDrawPage={setActiveDrawPage}
+          setActiveHighlightPage={setActiveHighlightPage}
           setActiveRedactionPage={setActiveRedactionPage}
+          setDrawColor={setDrawColor}
+          setDrawOpacity={setDrawOpacity}
+          setDrawThickness={setDrawThickness}
+          setHighlightColor={setHighlightColor}
+          setHighlightOpacity={setHighlightOpacity}
+          setOcrLanguage={setOcrLanguage}
           setReaderPageIndex={setReaderPageIndex}
+          setSearchQuery={setSearchQuery}
           setRedactColor={setRedactColor}
           setReorderDragPage={setReorderDragPage}
           setCrop={setCrop}
@@ -1196,7 +1571,12 @@ export default function App() {
           signatureBusy={signatureBusy}
           signatureReport={signatureReport}
           togglePage={togglePage}
+          signAllPages={signAllPages}
+          textAllPages={textAllPages}
           topSpacerHeight={topSpacerHeight}
+          openSearchResult={openSearchResult}
+          runReaderSearch={runReaderSearch}
+          clearReaderSearch={clearReaderSearch}
           updateWatermarkImage={updateWatermarkImage}
           visiblePages={visiblePages}
           visibleStartIndex={visibleStartIndex}

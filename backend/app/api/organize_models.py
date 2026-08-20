@@ -142,6 +142,104 @@ class RedactRequest(BaseModel):
         return value
 
 
+class HighlightRequest(BaseModel):
+    input_paths: list[str]
+    regions: list[RedactionRegion]
+    color: str = "#f2cd53"
+    opacity: float = 0.34
+
+    @field_validator("input_paths")
+    @classmethod
+    def non_empty(cls, value: list[str]) -> list[str]:
+        if len(value) != 1:
+            raise ValueError("highlight-pdf expects exactly one input PDF")
+        return value
+
+    @field_validator("regions")
+    @classmethod
+    def has_regions(cls, value: list[RedactionRegion]) -> list[RedactionRegion]:
+        if not value:
+            raise ValueError("at least one highlight region is required")
+        return value
+
+
+class DrawPoint(BaseModel):
+    x: float
+    y: float
+
+
+class DrawStroke(BaseModel):
+    page: int
+    points: list[DrawPoint]
+
+    @field_validator("points")
+    @classmethod
+    def enough_points(cls, value: list[DrawPoint]) -> list[DrawPoint]:
+        if len(value) < 2:
+            raise ValueError("each stroke must have at least two points")
+        return value
+
+
+class DrawRequest(BaseModel):
+    input_paths: list[str]
+    strokes: list[DrawStroke]
+    color: str = "#b02730"
+    opacity: float = 0.92
+    thickness: float = 3.0
+
+    @field_validator("input_paths")
+    @classmethod
+    def non_empty(cls, value: list[str]) -> list[str]:
+        if len(value) != 1:
+            raise ValueError("draw-pdf expects exactly one input PDF")
+        return value
+
+    @field_validator("strokes")
+    @classmethod
+    def has_strokes(cls, value: list[DrawStroke]) -> list[DrawStroke]:
+        if not value:
+            raise ValueError("at least one drawing stroke is required")
+        return value
+
+
+class SearchRequest(BaseModel):
+    input_paths: list[str]
+    query: str
+
+    @field_validator("input_paths")
+    @classmethod
+    def single_pdf(cls, value: list[str]) -> list[str]:
+        if len(value) != 1:
+            raise ValueError("search-text expects exactly one input PDF")
+        return value
+
+    @field_validator("query")
+    @classmethod
+    def non_empty_query(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("search query must not be empty")
+        return value
+
+
+class OcrRequest(BaseModel):
+    input_paths: list[str]
+    lang: str = "eng"
+
+    @field_validator("input_paths")
+    @classmethod
+    def single_pdf(cls, value: list[str]) -> list[str]:
+        if len(value) != 1:
+            raise ValueError("OCR expects exactly one input PDF")
+        return value
+
+    @field_validator("lang")
+    @classmethod
+    def non_empty_lang(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("OCR language must not be empty")
+        return value
+
+
 class SignatureField(BaseModel):
     name: str
     signed: bool
@@ -155,6 +253,25 @@ class SignatureReport(BaseModel):
     document_signed: bool
     signature_count: int
     fields: list[SignatureField]
+
+
+class SearchMatch(BaseModel):
+    page: int
+    count: int
+    snippet: str
+
+
+class SearchResponse(BaseModel):
+    query: str
+    matches: list[SearchMatch]
+    pages_with_matches: int
+    total_matches: int
+
+
+class OcrTextResponse(BaseModel):
+    output_path: str
+    text: str
+    page_count: int
 
 
 class PreviewPage(BaseModel):

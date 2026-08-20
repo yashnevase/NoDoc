@@ -24,8 +24,12 @@ from app.api.organize_models import (
     CropRequest,
     CompressRequest,
     ConvertResponse,
+    DrawRequest,
     DuplicateRequest,
+    HighlightRequest,
     MetadataRequest,
+    OcrRequest,
+    OcrTextResponse,
     RedactRequest,
     JobAcceptedResponse,
     MergeRequest,
@@ -35,6 +39,8 @@ from app.api.organize_models import (
     PreviewManifestResponse,
     PreviewPageResponse,
     PreviewResponse,
+    SearchRequest,
+    SearchResponse,
     ReverseRequest,
     SignatureReport,
 )
@@ -43,7 +49,12 @@ from app.services.organize_service import (
     add_text_watermark_file,
     crop_pdf_file,
     compress_pdf_file,
+    draw_pdf_file,
+    highlight_pdf_file,
     redact_pdf_file,
+    ocr_text_file,
+    searchable_pdf_file,
+    search_text_file,
     read_metadata_file,
     write_metadata_file,
     delete_pages_file,
@@ -369,6 +380,55 @@ async def signature_report(req: MergeRequest) -> SignatureReport:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
+@router.post("/search-text", response_model=SearchResponse)
+async def search_text(req: SearchRequest) -> SearchResponse:
+    input_path = require_single_input(req.input_paths, "search-text expects exactly one input PDF")
+    try:
+        return SearchResponse(**search_text_file(input_path, req.query))
+    except PdfEngineError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/ocr-text", response_model=OcrTextResponse | JobAcceptedResponse)
+async def ocr_text(req: OcrRequest, async_job: bool = False) -> OcrTextResponse | JobAcceptedResponse:
+    input_path = require_single_input(req.input_paths, "ocr-text expects exactly one input PDF")
+    if async_job:
+        return enqueue_job(
+            "ocr_text",
+            lambda progress: ocr_text_file(
+                input_path,
+                lang=req.lang,
+                on_progress=lambda value: progress(value, "Running OCR"),
+            ),
+        )
+    try:
+        return OcrTextResponse(**ocr_text_file(input_path, lang=req.lang))
+    except PdfEngineError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/searchable-pdf", response_model=ConvertResponse | JobAcceptedResponse)
+async def searchable_pdf(req: OcrRequest, async_job: bool = False) -> ConvertResponse | JobAcceptedResponse:
+    input_path = require_single_input(req.input_paths, "searchable-pdf expects exactly one input PDF")
+    if async_job:
+        return enqueue_job(
+            "searchable_pdf",
+            lambda progress: {
+                "output_path": str(
+                    searchable_pdf_file(
+                        input_path,
+                        lang=req.lang,
+                        on_progress=lambda value: progress(value, "Building searchable PDF"),
+                    )
+                )
+            },
+        )
+    try:
+        return convert_response(searchable_pdf_file(input_path, lang=req.lang))
+    except PdfEngineError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
 @router.post("/repair-pdf", response_model=ConvertResponse | JobAcceptedResponse)
 async def repair_pdf(req: MergeRequest, async_job: bool = False) -> ConvertResponse | JobAcceptedResponse:
     input_path = require_single_input(req.input_paths, "repair-pdf expects exactly one input PDF")
@@ -476,6 +536,72 @@ async def redact_pdf(req: RedactRequest, async_job: bool = False) -> ConvertResp
                 input_path,
                 regions=regions,
                 color=req.color,
+            )
+        )
+    except PdfEngineError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/highlight-pdf", response_model=ConvertResponse | JobAcceptedResponse)
+async def highlight_pdf(req: HighlightRequest, async_job: bool = False) -> ConvertResponse | JobAcceptedResponse:
+    input_path = require_single_input(req.input_paths, "highlight-pdf expects exactly one input PDF")
+    regions = [region.model_dump() for region in req.regions]
+    if async_job:
+        return enqueue_job(
+            "highlight_pdf",
+            lambda progress: {
+                "output_path": str(
+                    highlight_pdf_file(
+                        input_path,
+                        regions=regions,
+                        color=req.color,
+                        opacity=req.opacity,
+                        on_progress=lambda value: progress(value, "Applying highlights"),
+                    )
+                )
+            },
+        )
+    try:
+        return convert_response(
+            highlight_pdf_file(
+                input_path,
+                regions=regions,
+                color=req.color,
+                opacity=req.opacity,
+            )
+        )
+    except PdfEngineError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/draw-pdf", response_model=ConvertResponse | JobAcceptedResponse)
+async def draw_pdf(req: DrawRequest, async_job: bool = False) -> ConvertResponse | JobAcceptedResponse:
+    input_path = require_single_input(req.input_paths, "draw-pdf expects exactly one input PDF")
+    strokes = [stroke.model_dump() for stroke in req.strokes]
+    if async_job:
+        return enqueue_job(
+            "draw_pdf",
+            lambda progress: {
+                "output_path": str(
+                    draw_pdf_file(
+                        input_path,
+                        strokes=strokes,
+                        color=req.color,
+                        opacity=req.opacity,
+                        thickness=req.thickness,
+                        on_progress=lambda value: progress(value, "Applying drawing"),
+                    )
+                )
+            },
+        )
+    try:
+        return convert_response(
+            draw_pdf_file(
+                input_path,
+                strokes=strokes,
+                color=req.color,
+                opacity=req.opacity,
+                thickness=req.thickness,
             )
         )
     except PdfEngineError as exc:

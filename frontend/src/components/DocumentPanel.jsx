@@ -2,9 +2,14 @@ import { readyToolIds } from "../config/tools";
 import { PageGrid } from "./PageGrid";
 import { ReaderPanel } from "./ReaderPanel";
 import { CropEditor } from "./CropEditor";
+import { DrawEditor } from "./DrawEditor";
+import { HighlightEditor } from "./HighlightEditor";
 import { MetadataEditor } from "./MetadataEditor";
+import { OcrEditor } from "./OcrEditor";
 import { RedactEditor } from "./RedactEditor";
 import { SignatureReportView } from "./SignatureReportView";
+import { SignatureEditor } from "./SignatureEditor";
+import { TextEditor } from "./TextEditor";
 import { WatermarkEditor } from "./WatermarkEditor";
 
 export function DocumentPanel({
@@ -18,9 +23,16 @@ export function DocumentPanel({
   currentReaderIndex,
   currentReaderPage,
   dragDepthRef,
+  drawColor,
+  drawOpacity,
+  drawStrokes,
+  drawThickness,
   endPageDragSelection,
   exactlyOnePdfSelected,
   fileItems,
+  highlightColor,
+  highlightOpacity,
+  highlightRegions,
   internalDragRef,
   isBusy,
   movePreviewPage,
@@ -38,6 +50,10 @@ export function DocumentPanel({
   readerPageLabel,
   readerPaperStyle,
   readerZoom,
+  searchBusy,
+  searchQuery,
+  searchResults,
+  searchSummary,
   reorderActive,
   reorderChanged,
   reorderDragPage,
@@ -49,6 +65,7 @@ export function DocumentPanel({
   selectionLabel,
   setDropOverlayActive,
   setReaderPageIndex,
+  setSearchQuery,
   setReorderDragPage,
   setWatermarkAngle,
   setWatermarkColor,
@@ -63,7 +80,29 @@ export function DocumentPanel({
   signatureBusy,
   signatureReport,
   togglePage,
+  textAllPages,
+  signAllPages,
   topSpacerHeight,
+  openSearchResult,
+  runReaderSearch,
+  clearReaderSearch,
+  activeDrawPage,
+  addDrawStroke,
+  activeHighlightPage,
+  clearAllDrawStrokes,
+  addHighlightRect,
+  clearDrawStrokesForPage,
+  clearAllHighlights,
+  removeLastDrawStroke,
+  clearHighlightsForPage,
+  removeHighlightRect,
+  setActiveDrawPage,
+  setActiveHighlightPage,
+  setDrawColor,
+  setDrawOpacity,
+  setDrawThickness,
+  setHighlightColor,
+  setHighlightOpacity,
   updateWatermarkImage,
   visiblePages,
   visibleStartIndex,
@@ -86,6 +125,10 @@ export function DocumentPanel({
   cropScope,
   metadata,
   metadataForm,
+  ocrEngineHint,
+  ocrLanguage,
+  ocrPageCount,
+  ocrTextPreview,
   loadMetadata,
   removeAllMetadata,
   redactColor,
@@ -98,6 +141,7 @@ export function DocumentPanel({
   setActiveRedactionPage,
   setRedactColor,
   setMetadataForm,
+  setOcrLanguage,
   setCrop,
   setCropScope,
 }) {
@@ -136,7 +180,15 @@ export function DocumentPanel({
               readerPageLabel={readerPageLabel}
               readerPaperStyle={readerPaperStyle}
               readerZoom={readerZoom}
+              searchBusy={searchBusy}
+              searchQuery={searchQuery}
+              searchResults={searchResults}
+              searchSummary={searchSummary}
+              setSearchQuery={setSearchQuery}
               setReaderPageIndex={setReaderPageIndex}
+              openSearchResult={openSearchResult}
+              runSearch={runReaderSearch}
+              clearSearch={clearReaderSearch}
             />
           )}
 
@@ -149,6 +201,10 @@ export function DocumentPanel({
                     ? "All pages targeted"
                     : activeTool === "watermark" && watermarkAllPages
                       ? "All pages targeted"
+                      : activeTool === "sign" && signAllPages
+                        ? "All pages targeted"
+                      : activeTool === "text" && textAllPages
+                        ? "All pages targeted"
                       : `${selectedPages.length} selected`}
                 </span>
               </div>
@@ -226,6 +282,65 @@ export function DocumentPanel({
             />
           )}
 
+          {activeTool === "sign" && (
+            <SignatureEditor
+              beginWatermarkDial={beginWatermarkDial}
+              isBusy={isBusy}
+              previewPage={previewPage}
+              previewPageLabel={previewPageLabel}
+              previewPageNumber={previewPageNumber}
+              previewPaperStyle={previewPaperStyle}
+              previewSessionId={previewSessionId}
+              selectedPages={selectedPages}
+              setWatermarkAngle={setWatermarkAngle}
+              setWatermarkImageFile={setWatermarkImageFile}
+              setWatermarkOpacity={setWatermarkOpacity}
+              setWatermarkPosition={setWatermarkPosition}
+              setWatermarkScope={setWatermarkScope}
+              setWatermarkSize={setWatermarkSize}
+              updateWatermarkImage={updateWatermarkImage}
+              watermarkAngle={watermarkAngle}
+              watermarkImageFile={watermarkImageFile}
+              watermarkImageInputRef={watermarkImageInputRef}
+              watermarkImagePreview={watermarkImagePreview}
+              watermarkOpacity={watermarkOpacity}
+              watermarkPlacementStyle={watermarkPlacementStyle}
+              watermarkPosition={watermarkPosition}
+              watermarkScope={watermarkScope}
+              watermarkSize={watermarkSize}
+            />
+          )}
+
+          {activeTool === "text" && (
+            <TextEditor
+              beginWatermarkDial={beginWatermarkDial}
+              isBusy={isBusy}
+              previewPage={previewPage}
+              previewPageLabel={previewPageLabel}
+              previewPageNumber={previewPageNumber}
+              previewPaperStyle={previewPaperStyle}
+              previewSessionId={previewSessionId}
+              selectedPages={selectedPages}
+              setWatermarkAngle={setWatermarkAngle}
+              setWatermarkColor={setWatermarkColor}
+              setWatermarkOpacity={setWatermarkOpacity}
+              setWatermarkPosition={setWatermarkPosition}
+              setWatermarkScope={setWatermarkScope}
+              setWatermarkSize={setWatermarkSize}
+              setWatermarkText={setWatermarkText}
+              textAllPages={textAllPages}
+              watermarkAngle={watermarkAngle}
+              watermarkColor={watermarkColor}
+              watermarkDialRef={watermarkDialRef}
+              watermarkOpacity={watermarkOpacity}
+              watermarkPlacementStyle={watermarkPlacementStyle}
+              watermarkPosition={watermarkPosition}
+              watermarkScope={watermarkScope}
+              watermarkSize={watermarkSize}
+              watermarkText={watermarkText}
+            />
+          )}
+
           {activeTool === "crop" && (
             <CropEditor
               crop={crop}
@@ -254,6 +369,18 @@ export function DocumentPanel({
             />
           )}
 
+          {["image_text", "searchable"].includes(activeTool) && (
+            <OcrEditor
+              activeTool={activeTool}
+              isBusy={isBusy}
+              ocrEngineHint={ocrEngineHint}
+              ocrLanguage={ocrLanguage}
+              ocrPageCount={ocrPageCount}
+              ocrTextPreview={ocrTextPreview}
+              setOcrLanguage={setOcrLanguage}
+            />
+          )}
+
           {activeTool === "redact" && (
             <RedactEditor
               activeRedactionPage={activeRedactionPage}
@@ -269,6 +396,48 @@ export function DocumentPanel({
               selectedPages={selectedPages}
               setActiveRedactionPage={setActiveRedactionPage}
               setRedactColor={setRedactColor}
+            />
+          )}
+
+          {activeTool === "highlight" && (
+            <HighlightEditor
+              activeHighlightPage={activeHighlightPage}
+              addHighlightRect={addHighlightRect}
+              clearAllHighlights={clearAllHighlights}
+              clearHighlightsForPage={clearHighlightsForPage}
+              highlightColor={highlightColor}
+              highlightOpacity={highlightOpacity}
+              highlightRegions={highlightRegions}
+              isBusy={isBusy}
+              pagePreview={pagePreview}
+              previewSessionId={previewSessionId}
+              removeHighlightRect={removeHighlightRect}
+              selectedPages={selectedPages}
+              setActiveHighlightPage={setActiveHighlightPage}
+              setHighlightColor={setHighlightColor}
+              setHighlightOpacity={setHighlightOpacity}
+            />
+          )}
+
+          {activeTool === "draw" && (
+            <DrawEditor
+              activeDrawPage={activeDrawPage}
+              addDrawStroke={addDrawStroke}
+              clearAllDrawStrokes={clearAllDrawStrokes}
+              clearDrawStrokesForPage={clearDrawStrokesForPage}
+              drawColor={drawColor}
+              drawOpacity={drawOpacity}
+              drawStrokes={drawStrokes}
+              drawThickness={drawThickness}
+              isBusy={isBusy}
+              pagePreview={pagePreview}
+              previewSessionId={previewSessionId}
+              removeLastDrawStroke={removeLastDrawStroke}
+              selectedPages={selectedPages}
+              setActiveDrawPage={setActiveDrawPage}
+              setDrawColor={setDrawColor}
+              setDrawOpacity={setDrawOpacity}
+              setDrawThickness={setDrawThickness}
             />
           )}
 

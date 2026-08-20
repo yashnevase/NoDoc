@@ -11,7 +11,15 @@ export function ReaderPanel({
   readerPageLabel,
   readerPaperStyle,
   readerZoom,
+  searchBusy,
+  searchQuery,
+  searchResults,
+  searchSummary,
+  setSearchQuery,
   setReaderPageIndex,
+  openSearchResult,
+  runSearch,
+  clearSearch,
 }) {
   return (
     <div className="reader-panel">
@@ -23,8 +31,60 @@ export function ReaderPanel({
         <div className="reader-summary-pills">
           <span>{`${Math.round(readerZoom * 100)}% zoom`}</span>
           <span>{pagePreview.length ? `${pagePreview.length} pages` : "No pages"}</span>
+          {searchSummary ? <span>{searchSummary}</span> : null}
         </div>
       </div>
+
+      <form
+        className="reader-search"
+        onSubmit={(event) => {
+          event.preventDefault();
+          runSearch();
+        }}
+      >
+        <label className="field compact-field">
+          <span>Search this PDF</span>
+          <input
+            type="text"
+            value={searchQuery}
+            onChange={(event) => setSearchQuery(event.target.value)}
+            placeholder="Find words or phrases"
+            disabled={isBusy || previewBusy}
+          />
+        </label>
+        <div className="reader-search-actions">
+          <button type="submit" disabled={isBusy || previewBusy || !searchQuery.trim()}>
+            Search
+          </button>
+          <button type="button" onClick={clearSearch} disabled={isBusy || previewBusy || (!searchQuery && !searchResults.length)}>
+            Clear
+          </button>
+        </div>
+      </form>
+
+      {(searchBusy || searchResults.length > 0) && (
+        <div className="reader-search-results">
+          {searchBusy ? (
+            <div className="preview-loading">
+              <span />
+              <p>Searching text</p>
+            </div>
+          ) : (
+            searchResults.map((match) => (
+              <button
+                key={`${match.page}-${match.snippet}`}
+                type="button"
+                className={`reader-search-result ${currentReaderPage?.page === match.page ? "is-active" : ""}`}
+                onClick={() => openSearchResult(match.page)}
+              >
+                <strong>{`Page ${match.page}`}</strong>
+                <span>{`${match.count} match${match.count === 1 ? "" : "es"}`}</span>
+                <p>{match.snippet}</p>
+              </button>
+            ))
+          )}
+        </div>
+      )}
 
       {previewBusy ? (
         <div className="preview-loading">

@@ -16,6 +16,10 @@ from engines.images.to_pdf import images_to_pdf as engine_images_to_pdf
 from engines.pdf.compress import compress_pdf as engine_compress_pdf
 from engines.pdf.convert import pdf_to_images as engine_pdf_to_images
 from engines.pdf.convert import split_pdf as engine_split_pdf
+from engines.pdf.draw import draw_strokes as engine_draw_strokes
+from engines.pdf.highlight import highlight_pages as engine_highlight_pages
+from engines.pdf.ocr import ocr_pdf_to_searchable as engine_ocr_pdf_to_searchable
+from engines.pdf.ocr import ocr_pdf_to_text as engine_ocr_pdf_to_text
 from engines.pdf.organize import add_image_watermark as engine_add_image_watermark
 from engines.pdf.organize import add_text_watermark as engine_add_text_watermark
 from engines.pdf.organize import add_page_numbers as engine_add_page_numbers
@@ -31,6 +35,7 @@ from engines.pdf.organize import rotate as engine_rotate
 from engines.pdf.redact import redact_pages as engine_redact_pages
 from engines.pdf.security import password_protect as engine_password_protect
 from engines.pdf.security import inspect_signatures as engine_inspect_signatures
+from engines.pdf.text_search import search_text as engine_search_text
 from engines.metadata.pdf_metadata import read_metadata as engine_read_metadata
 from engines.metadata.pdf_metadata import write_metadata as engine_write_metadata
 
@@ -102,6 +107,10 @@ def inspect_signatures_file(input_path: Path) -> dict[str, object]:
     return engine_inspect_signatures(input_path)
 
 
+def search_text_file(input_path: Path, query: str) -> dict[str, object]:
+    return engine_search_text(input_path, query)
+
+
 def read_metadata_file(input_path: Path) -> dict[str, str]:
     return engine_read_metadata(input_path)
 
@@ -161,6 +170,37 @@ def compress_pdf_file(
 ) -> Path:
     output = safe_output_path(input_path, "compressed")
     return engine_compress_pdf(input_path, output, preset=preset, on_progress=on_progress)
+
+
+def safe_text_output_path(first_input: Path, suffix: str) -> Path:
+    out_dir = first_input.parent / "processed"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    candidate = out_dir / f"{first_input.stem}_{suffix}.txt"
+    n = 1
+    while candidate.exists():
+        candidate = out_dir / f"{first_input.stem}_{suffix}_{n}.txt"
+        n += 1
+    return candidate
+
+
+def ocr_text_file(
+    input_path: Path,
+    *,
+    lang: str = "eng",
+    on_progress: Callable[[int], None] | None = None,
+) -> dict[str, object]:
+    output = safe_text_output_path(input_path, "ocr")
+    return engine_ocr_pdf_to_text(input_path, output, lang=lang, on_progress=on_progress)
+
+
+def searchable_pdf_file(
+    input_path: Path,
+    *,
+    lang: str = "eng",
+    on_progress: Callable[[int], None] | None = None,
+) -> Path:
+    output = safe_output_path(input_path, "searchable")
+    return engine_ocr_pdf_to_searchable(input_path, output, lang=lang, on_progress=on_progress)
 
 
 def add_text_watermark_file(
@@ -282,6 +322,46 @@ def redact_pdf_file(
         output,
         regions=regions,
         color=color,
+        on_progress=on_progress,
+    )
+
+
+def highlight_pdf_file(
+    input_path: Path,
+    *,
+    regions: list[dict[str, float | int]],
+    color: str = "#f2cd53",
+    opacity: float = 0.34,
+    on_progress: Callable[[int], None] | None = None,
+) -> Path:
+    output = safe_output_path(input_path, "highlighted")
+    return engine_highlight_pages(
+        input_path,
+        output,
+        regions=regions,
+        color=color,
+        opacity=opacity,
+        on_progress=on_progress,
+    )
+
+
+def draw_pdf_file(
+    input_path: Path,
+    *,
+    strokes: list[dict[str, object]],
+    color: str = "#b02730",
+    opacity: float = 0.92,
+    thickness: float = 3.0,
+    on_progress: Callable[[int], None] | None = None,
+) -> Path:
+    output = safe_output_path(input_path, "drawn")
+    return engine_draw_strokes(
+        input_path,
+        output,
+        strokes=strokes,
+        color=color,
+        opacity=opacity,
+        thickness=thickness,
         on_progress=on_progress,
     )
 
