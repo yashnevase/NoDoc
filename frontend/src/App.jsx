@@ -1,10 +1,12 @@
 import { useEffect, useRef, useState } from "react";
 
 import { BusyBar } from "./components/BusyBar";
+import { CropEditor } from "./components/CropEditor";
 import { DocumentPanel } from "./components/DocumentPanel";
 import { DropOverlay } from "./components/DropOverlay";
 import { FilePanel } from "./components/FilePanel";
 import { HeaderRibbon } from "./components/HeaderRibbon";
+import { MetadataEditor } from "./components/MetadataEditor";
 import { SettingsDrawer } from "./components/SettingsDrawer";
 import { StatusBar } from "./components/StatusBar";
 import {
@@ -44,8 +46,14 @@ import {
   reversePagesUpload,
   duplicatePagesPath,
   duplicatePagesUpload,
+  cropPdfPath,
+  cropPdfUpload,
   compressPdfPath,
   compressPdfUpload,
+  metadataPath,
+  metadataUpload,
+  metadataViewPath,
+  metadataViewUpload,
   pageNumbersPath,
   pageNumbersUpload,
   repairPdfPath,
@@ -95,6 +103,17 @@ export default function App() {
   const [rotation, setRotation] = useState(90);
   const [rotateScope, setRotateScope] = useState("selected");
   const [compressPreset, setCompressPreset] = useState("balanced");
+  const [cropScope, setCropScope] = useState("selected");
+  const [crop, setCrop] = useState({ left: 0, top: 0, right: 0, bottom: 0 });
+  const [metadataForm, setMetadataForm] = useState({
+    title: "",
+    author: "",
+    subject: "",
+    keywords: "",
+    creator: "",
+    producer: "",
+  });
+  const [metadata, setMetadata] = useState(null);
   const [password, setPassword] = useState("");
   const [watermarkText, setWatermarkText] = useState("NoDoc");
   const [watermarkMode, setWatermarkMode] = useState("text");
@@ -174,12 +193,13 @@ export default function App() {
   const isBusy = Boolean(busyLabel);
   const showCancelAction = isBusy || previewBusy;
   const readerActive = activeTool === "reader";
-  const pageToolActive = ["extract", "delete", "rotate", "watermark", "duplicate"].includes(activeTool);
+  const pageToolActive = ["extract", "delete", "rotate", "watermark", "duplicate", "crop", "metadata"].includes(activeTool);
   const reorderActive = activeTool === "reorder";
   const watermarkAllPages = activeTool === "watermark" && watermarkScope === "all";
+  const cropAllPages = activeTool === "crop" && cropScope === "all";
   const reorderChanged = pagePreview.length > 0 && pagePreview.some((page, index) => page.page !== index + 1);
   const rotateAppliesToAll = activeTool === "rotate" && rotateScope === "all";
-  const pageSelectionLocked = rotateAppliesToAll || watermarkAllPages;
+  const pageSelectionLocked = rotateAppliesToAll || watermarkAllPages || cropAllPages;
   const selectionLabel = pageToolActive && pagePreview.length
     ? pageSelectionLocked
       ? `${pagePreview.length}/${pagePreview.length} selected`
@@ -575,6 +595,41 @@ export default function App() {
     setWatermarkMode("image");
   }
 
+  async function loadMetadata() {
+    const requestOptions = { signal: previewAbortRef.current?.signal };
+    try {
+      const response = hasPaths
+        ? await metadataViewPath(pathInputs, requestOptions)
+        : await metadataViewUpload(uploadedFiles, requestOptions);
+      const loaded = response?.metadata || {};
+      setMetadata(loaded);
+      setMetadataForm({
+        title: loaded.Title || "",
+        author: loaded.Author || "",
+        subject: loaded.Subject || "",
+        keywords: loaded.Keywords || "",
+        creator: loaded.Creator || "",
+        producer: loaded.Producer || "",
+      });
+      setStatus("Metadata loaded");
+    } catch (err) {
+      setStatus(`Metadata error: ${err.message}`);
+    }
+  }
+
+  async function removeAllMetadata() {
+    const requestOptions = { signal: previewAbortRef.current?.signal };
+    try {
+      const response = hasPaths
+        ? await metadataPath(pathInputs, { remove_all: true }, requestOptions)
+        : await metadataUpload(uploadedFiles, { remove_all: true }, requestOptions);
+      setResult({ tool: activeTool, paths: outputPathsFromResult(response) });
+      setStatus("Metadata removed");
+    } catch (err) {
+      setStatus(`Metadata error: ${err.message}`);
+    }
+  }
+
   function assertReady() {
     if (!readyToolIds.has(activeTool)) {
       return `${activeToolInfo?.title || "This tool"} is planned for later.`;
@@ -588,10 +643,10 @@ export default function App() {
     if (activeTool === "images" && !allSelectedAreImages) {
       return "Select one or more image files.";
     }
-    if (["reader", "split", "render", "extract", "delete", "rotate", "reorder", "compress", "password", "repair", "watermark", "digital_sign", "page_numbers"].includes(activeTool) && !exactlyOnePdfSelected) {
+  if (["reader", "split", "render", "extract", "delete", "rotate", "reorder", "compress", "password", "repair", "watermark", "digital_sign", "page_numbers", "crop", "metadata"].includes(activeTool) && !exactlyOnePdfSelected) {
       return "Select exactly one PDF file.";
     }
-    if (["extract", "delete", "duplicate"].includes(activeTool) && selectedPages.length === 0) {
+    if (["extract", "delete", "duplicate", "crop"].includes(activeTool) && selectedPages.length === 0) {
       return "Pick pages from the preview.";
     }
     if (activeTool === "rotate" && rotateScope === "selected" && selectedPages.length === 0) {
@@ -778,6 +833,30 @@ export default function App() {
             : hasPaths
               ? await watermarkTextPath(pathInputs, watermarkPayload, requestOptions)
               : await watermarkTextUpload(uploadedFiles, watermarkPayload, requestOptions);
+        } else if (activeTool === "crop") {
+          const cropPayload = {
+            pages: pageRange,
+            left: crop.left,
+            top: crop.top,
+            right: crop.right,
+            bottom: crop.bottom,
+          };
+          response = hasPaths
+            ? await cropPdfPath(pathInputs, cropPayload, requestOptions)
+            : await cropPdfUpload(uploadedFiles, cropPayload, requestOptions);
+        } else if (activeTool === "metadata") {
+          const metadataPayload = {
+            title: metadataForm.title,
+            author: metadataForm.author,
+            subject: metadataForm.subject,
+            keywords: metadataForm.keywords,
+            creator: metadataForm.creator,
+            producer: metadataForm.producer,
+            remove_all: false,
+          };
+          response = hasPaths
+            ? await metadataPath(pathInputs, metadataPayload, requestOptions)
+            : await metadataUpload(uploadedFiles, metadataPayload, requestOptions);
         } else if (activeTool === "digital_sign") {
           response = hasPaths ? await signatureReportPath(pathInputs, { signal }) : await signatureReportUpload(uploadedFiles, { signal });
           setSignatureReport(response);
@@ -1004,9 +1083,18 @@ export default function App() {
           selectAllPages={selectAllPages}
           selectedPages={selectedPages}
           selectionLabel={selectionLabel}
+          crop={crop}
+          cropScope={cropScope}
+          loadMetadata={loadMetadata}
+          metadata={metadata}
+          metadataForm={metadataForm}
+          removeAllMetadata={removeAllMetadata}
           setDropOverlayActive={setDropOverlayActive}
           setReaderPageIndex={setReaderPageIndex}
           setReorderDragPage={setReorderDragPage}
+          setCrop={setCrop}
+          setCropScope={setCropScope}
+          setMetadataForm={setMetadataForm}
           setWatermarkAngle={setWatermarkAngle}
           setWatermarkColor={setWatermarkColor}
           setWatermarkImageFile={setWatermarkImageFile}

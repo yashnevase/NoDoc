@@ -611,6 +611,110 @@ p {
   font-size: 0.74rem;
 }
 
+.crop-editor {
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(246, 244, 244, 0.98));
+  border: 1px solid rgba(28, 28, 30, 0.08);
+  border-radius: 14px;
+  display: grid;
+  gap: 0.75rem;
+  min-height: 0;
+  overflow: hidden;
+  padding: 0.75rem;
+}
+
+.crop-editor-head {
+  align-items: center;
+  display: flex;
+  justify-content: space-between;
+}
+
+.crop-editor-head div {
+  display: grid;
+  gap: 0.1rem;
+}
+
+.crop-editor-head strong {
+  font-size: 0.88rem;
+}
+
+.crop-editor-head span {
+  color: var(--muted);
+  font-size: 0.74rem;
+}
+
+.crop-editor-body {
+  display: grid;
+  gap: 0.8rem;
+  grid-template-columns: minmax(180px, 0.7fr) minmax(0, 1.3fr);
+  min-height: 0;
+  align-items: start;
+}
+
+.crop-preview-shell {
+  align-content: start;
+  background: rgba(245, 245, 247, 0.92);
+  border: 1px solid rgba(28, 28, 30, 0.08);
+  border-radius: 16px;
+  display: grid;
+  gap: 0.65rem;
+  min-height: 0;
+  min-width: 0;
+  padding: 0.75rem;
+}
+
+.crop-preview-page {
+  align-items: center;
+  background:
+    radial-gradient(circle at top, rgba(176, 39, 48, 0.08), transparent 35%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.99), rgba(246, 246, 248, 0.98));
+  border: 1px solid rgba(28, 28, 30, 0.1);
+  border-radius: 14px;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.6);
+  display: grid;
+  inline-size: min(100%, 292px);
+  justify-items: center;
+  margin: 0 auto;
+  min-height: 190px;
+  max-height: min(34vh, 280px);
+  overflow: hidden;
+  position: relative;
+}
+
+.crop-preview-size {
+  background: rgba(28, 28, 30, 0.08);
+  border-radius: 999px;
+  color: #4f4f57;
+  font-size: 0.72rem;
+  left: 0.7rem;
+  padding: 0.2rem 0.5rem;
+  position: absolute;
+  top: 0.7rem;
+  z-index: 4;
+}
+
+.crop-preview-mask {
+  position: absolute;
+  inset: 0;
+  border: 2px solid rgba(176, 39, 48, 0.75);
+  background:
+    linear-gradient(to right, rgba(176, 39, 48, 0.16), rgba(176, 39, 48, 0.16)) left / var(--crop-left, 0%) 100% no-repeat,
+    linear-gradient(to left, rgba(176, 39, 48, 0.16), rgba(176, 39, 48, 0.16)) right / var(--crop-right, 0%) 100% no-repeat,
+    linear-gradient(to bottom, rgba(176, 39, 48, 0.16), rgba(176, 39, 48, 0.16)) top / 100% var(--crop-top, 0%) no-repeat,
+    linear-gradient(to top, rgba(176, 39, 48, 0.16), rgba(176, 39, 48, 0.16)) bottom / 100% var(--crop-bottom, 0%) no-repeat;
+  pointer-events: none;
+}
+
+.crop-controls {
+  display: grid;
+  gap: 0.8rem;
+}
+
+.crop-grid {
+  display: grid;
+  gap: 0.62rem;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
 .watermark-grid {
   display: grid;
   gap: 0.62rem;

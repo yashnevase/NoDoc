@@ -19,6 +19,7 @@ from engines.pdf.convert import split_pdf as engine_split_pdf
 from engines.pdf.organize import add_image_watermark as engine_add_image_watermark
 from engines.pdf.organize import add_text_watermark as engine_add_text_watermark
 from engines.pdf.organize import add_page_numbers as engine_add_page_numbers
+from engines.pdf.organize import crop_pages as engine_crop_pages
 from engines.pdf.organize import delete_pages as engine_delete_pages
 from engines.pdf.organize import extract_pages as engine_extract_pages
 from engines.pdf.organize import merge as engine_merge
@@ -29,6 +30,8 @@ from engines.pdf.organize import reverse_pages as engine_reverse_pages
 from engines.pdf.organize import rotate as engine_rotate
 from engines.pdf.security import password_protect as engine_password_protect
 from engines.pdf.security import inspect_signatures as engine_inspect_signatures
+from engines.metadata.pdf_metadata import read_metadata as engine_read_metadata
+from engines.metadata.pdf_metadata import write_metadata as engine_write_metadata
 
 
 def safe_output_path(first_input: Path, suffix: str) -> Path:
@@ -96,6 +99,37 @@ def password_protect_file(input_path: Path, password: str) -> Path:
 
 def inspect_signatures_file(input_path: Path) -> dict[str, object]:
     return engine_inspect_signatures(input_path)
+
+
+def read_metadata_file(input_path: Path) -> dict[str, str]:
+    return engine_read_metadata(input_path)
+
+
+def write_metadata_file(
+    input_path: Path,
+    *,
+    title: str = "",
+    author: str = "",
+    subject: str = "",
+    keywords: str = "",
+    creator: str = "",
+    producer: str = "",
+    remove_all: bool = False,
+) -> Path:
+    output = safe_output_path(input_path, "metadata")
+    return engine_write_metadata(
+        input_path,
+        output,
+        {
+            "Title": title,
+            "Author": author,
+            "Subject": subject,
+            "Keywords": keywords,
+            "Creator": creator,
+            "Producer": producer,
+        },
+        remove_all=remove_all,
+    )
 
 
 def reorder_pages_file(input_path: Path, page_indices: list[int]) -> Path:
@@ -210,6 +244,27 @@ def add_page_numbers_file(
         suffix=suffix,
         start=start,
         on_progress=on_progress,
+    )
+
+
+def crop_pdf_file(
+    input_path: Path,
+    *,
+    page_indices: list[int] | None = None,
+    left: float = 0.0,
+    top: float = 0.0,
+    right: float = 0.0,
+    bottom: float = 0.0,
+) -> Path:
+    output = safe_output_path(input_path, "cropped")
+    return engine_crop_pages(
+        input_path,
+        output,
+        pages=page_indices,
+        left=left,
+        top=top,
+        right=right,
+        bottom=bottom,
     )
 
 

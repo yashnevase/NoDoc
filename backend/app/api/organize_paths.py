@@ -21,9 +21,11 @@ from app.api.organize_helpers import (
     signature_report_response,
 )
 from app.api.organize_models import (
+    CropRequest,
     CompressRequest,
     ConvertResponse,
     DuplicateRequest,
+    MetadataRequest,
     JobAcceptedResponse,
     MergeRequest,
     MergeResponse,
@@ -38,7 +40,10 @@ from app.api.organize_models import (
 from app.services.organize_service import (
     add_page_numbers_file,
     add_text_watermark_file,
+    crop_pdf_file,
     compress_pdf_file,
+    read_metadata_file,
+    write_metadata_file,
     delete_pages_file,
     duplicate_pages_file,
     extract_pages_file,
@@ -304,6 +309,41 @@ async def page_numbers(req: PageNumbersRequest, async_job: bool = False) -> Conv
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
+@router.post("/crop-pdf", response_model=ConvertResponse | JobAcceptedResponse)
+async def crop_pdf(req: CropRequest, async_job: bool = False) -> ConvertResponse | JobAcceptedResponse:
+    input_path = require_single_input(req.input_paths, "crop-pdf expects exactly one input PDF")
+    page_indices = parse_page_ranges(req.pages) if req.pages.strip() else None
+    if async_job:
+        return enqueue_job(
+            "crop_pdf",
+            lambda progress: {
+                "output_path": str(
+                    crop_pdf_file(
+                        input_path,
+                        page_indices=page_indices,
+                        left=req.left,
+                        top=req.top,
+                        right=req.right,
+                        bottom=req.bottom,
+                    )
+                )
+            },
+        )
+    try:
+        return convert_response(
+            crop_pdf_file(
+                input_path,
+                page_indices=page_indices,
+                left=req.left,
+                top=req.top,
+                right=req.right,
+                bottom=req.bottom,
+            )
+        )
+    except PdfEngineError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
 @router.post("/password-protect", response_model=ConvertResponse | JobAcceptedResponse)
 async def password_protect(req: MergeRequest, password: str, async_job: bool = False) -> ConvertResponse | JobAcceptedResponse:
     input_path = require_single_input(req.input_paths, "password-protect expects exactly one input PDF")
@@ -343,7 +383,7 @@ async def repair_pdf(req: MergeRequest, async_job: bool = False) -> ConvertRespo
 
 @router.post("/compress-pdf", response_model=ConvertResponse | JobAcceptedResponse)
 async def compress_pdf(req: CompressRequest, async_job: bool = False) -> ConvertResponse | JobAcceptedResponse:
-    input_path = Path(req.input_paths[0])
+    input_path = require_single_input(req.input_paths, "compress-pdf expects exactly one input PDF")
     if async_job:
         return enqueue_job(
             "compress_pdf",
@@ -359,6 +399,53 @@ async def compress_pdf(req: CompressRequest, async_job: bool = False) -> Convert
         )
     try:
         return convert_response(compress_pdf_file(input_path, preset=req.preset))
+    except PdfEngineError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/metadata", response_model=ConvertResponse | JobAcceptedResponse)
+async def metadata(req: MetadataRequest, async_job: bool = False) -> ConvertResponse | JobAcceptedResponse:
+    input_path = require_single_input(req.input_paths, "metadata expects exactly one input PDF")
+    if async_job:
+        return enqueue_job(
+            "metadata",
+            lambda progress: {
+                "output_path": str(
+                    write_metadata_file(
+                        input_path,
+                        title=req.title,
+                        author=req.author,
+                        subject=req.subject,
+                        keywords=req.keywords,
+                        creator=req.creator,
+                        producer=req.producer,
+                        remove_all=req.remove_all,
+                    )
+                )
+            },
+        )
+    try:
+        return convert_response(
+            write_metadata_file(
+                input_path,
+                title=req.title,
+                author=req.author,
+                subject=req.subject,
+                keywords=req.keywords,
+                creator=req.creator,
+                producer=req.producer,
+                remove_all=req.remove_all,
+            )
+        )
+    except PdfEngineError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/metadata-view")
+async def metadata_view(req: MergeRequest) -> dict[str, object]:
+    input_path = require_single_input(req.input_paths, "metadata-view expects exactly one input PDF")
+    try:
+        return {"metadata": read_metadata_file(input_path)}
     except PdfEngineError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 

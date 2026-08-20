@@ -1,6 +1,8 @@
 import { readyToolIds } from "../config/tools";
 import { PageGrid } from "./PageGrid";
 import { ReaderPanel } from "./ReaderPanel";
+import { CropEditor } from "./CropEditor";
+import { MetadataEditor } from "./MetadataEditor";
 import { SignatureReportView } from "./SignatureReportView";
 import { WatermarkEditor } from "./WatermarkEditor";
 
@@ -79,6 +81,15 @@ export function DocumentPanel({
   watermarkScope,
   watermarkSize,
   watermarkText,
+  crop,
+  cropScope,
+  metadata,
+  metadataForm,
+  loadMetadata,
+  removeAllMetadata,
+  setMetadataForm,
+  setCrop,
+  setCropScope,
 }) {
   return (
     <section className="document-panel">
@@ -202,6 +213,34 @@ export function DocumentPanel({
               watermarkScope={watermarkScope}
               watermarkSize={watermarkSize}
               watermarkText={watermarkText}
+            />
+          )}
+
+          {activeTool === "crop" && (
+            <CropEditor
+              crop={crop}
+              cropScope={cropScope}
+              isBusy={isBusy}
+              previewPage={previewPage}
+              previewPageLabel={previewPageLabel}
+              previewPageNumber={previewPageNumber}
+              previewPaperStyle={previewPaperStyle}
+              previewSessionId={previewSessionId}
+              selectedPages={selectedPages}
+              setCrop={setCrop}
+              setCropScope={setCropScope}
+            />
+          )}
+
+          {activeTool === "metadata" && (
+            <MetadataEditor
+              isBusy={isBusy}
+              loadMetadata={loadMetadata}
+              metadata={metadata}
+              metadataForm={metadataForm}
+              removeAllMetadata={removeAllMetadata}
+              selectedPages={selectedPages}
+              setMetadataForm={setMetadataForm}
             />
           )}
 

@@ -443,6 +443,96 @@ def test_repair_pdf_path_succeeds_with_token(tmp_path: Path):
         assert len(result.pages) == 1
 
 
+def test_compress_pdf_upload_succeeds_with_token(tmp_path: Path):
+    source = make_pdf(tmp_path / "compressme.pdf", 2)
+    with source.open("rb") as source_file:
+        resp = client.post(
+            "/organize/compress-pdf-upload",
+            params={"async_job": "false"},
+            files=[("files", ("compressme.pdf", source_file, "application/pdf"))],
+            data={"preset": "balanced"},
+            headers={"x-privatepdf-token": settings.auth_token},
+        )
+
+    assert resp.status_code == 200
+    output_path = Path(resp.json()["output_path"])
+    assert output_path.exists()
+
+
+def test_compress_pdf_path_succeeds_with_token(tmp_path: Path):
+    source = make_pdf(tmp_path / "compress-path.pdf", 2)
+    before = source.stat().st_size
+    resp = client.post(
+        "/organize/compress-pdf",
+        params={"preset": "balanced"},
+        json={"input_paths": [str(source)]},
+        headers={"x-privatepdf-token": settings.auth_token},
+    )
+
+    assert resp.status_code == 200
+    output_path = Path(resp.json()["output_path"])
+    assert output_path.exists()
+    assert output_path.stat().st_size <= before
+
+
+def test_metadata_view_and_update_succeeds_with_token(tmp_path: Path):
+    source = make_pdf(tmp_path / "metadata.pdf", 1)
+    with pikepdf.open(source) as pdf:
+        pdf.docinfo["/Title"] = "Before"
+        pdf.save(tmp_path / "metadata-seeded.pdf")
+
+    seeded = tmp_path / "metadata-seeded.pdf"
+
+    resp = client.post(
+        "/organize/metadata-view",
+        json={"input_paths": [str(seeded)]},
+        headers={"x-privatepdf-token": settings.auth_token},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["metadata"]["Title"] == "Before"
+
+    updated = client.post(
+        "/organize/metadata",
+        json={
+            "input_paths": [str(seeded)],
+            "title": "After",
+            "author": "NoDoc",
+            "subject": "Test",
+            "keywords": "pdf,tool",
+            "creator": "NoDoc",
+            "producer": "NoDoc",
+        },
+        headers={"x-privatepdf-token": settings.auth_token},
+    )
+    assert updated.status_code == 200
+    output_path = Path(updated.json()["output_path"])
+    with pikepdf.open(output_path) as pdf:
+        assert str(pdf.docinfo.get("/Title", "")) == "After"
+        assert str(pdf.docinfo.get("/Author", "")) == "NoDoc"
+
+
+def test_metadata_upload_remove_all_succeeds_with_token(tmp_path: Path):
+    source = make_pdf(tmp_path / "metadata-remove.pdf", 1)
+    with pikepdf.open(source) as pdf:
+        pdf.docinfo["/Title"] = "Keep"
+        pdf.save(tmp_path / "metadata-remove-seeded.pdf")
+
+    seeded = tmp_path / "metadata-remove-seeded.pdf"
+
+    with seeded.open("rb") as source_file:
+        resp = client.post(
+            "/organize/metadata-upload",
+            files=[("files", ("metadata-remove.pdf", source_file, "application/pdf"))],
+            data={"remove_all": "true"},
+            headers={"x-privatepdf-token": settings.auth_token},
+        )
+
+    assert resp.status_code == 200
+    output_path = Path(resp.json()["output_path"])
+    with pikepdf.open(output_path) as pdf:
+        assert len(pdf.docinfo.keys()) == 0
+
+
 def test_watermark_text_upload_succeeds_with_token(tmp_path: Path):
     source = make_pdf(tmp_path / "watermarkme.pdf", 2)
     with source.open("rb") as source_file:

@@ -1,5 +1,5 @@
 """
-Core PDF organization operations: merge, split, extract, delete, reorder, rotate.
+Core PDF organization operations: merge, split, extract, delete, reorder, rotate, crop.
 
 Deliberately has zero web/framework imports — this module should be usable
 from a future CLI or test harness without pulling in FastAPI.
@@ -139,6 +139,46 @@ def reverse_pages(input_path: Path, output_path: Path) -> Path:
             for page in reversed(doc.pages):
                 target.pages.append(page)
             target.save(output_path)
+
+    return output_path
+
+
+def crop_pages(
+    input_path: Path,
+    output_path: Path,
+    *,
+    left: float = 0.0,
+    top: float = 0.0,
+    right: float = 0.0,
+    bottom: float = 0.0,
+    pages: list[int] | None = None,
+) -> Path:
+    """Apply a uniform crop margin to selected pages."""
+    if min(left, top, right, bottom) < 0:
+        raise PdfEngineError("crop margins must not be negative")
+
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    try:
+        with pikepdf.open(input_path) as doc:
+            target_pages = _target_page_indices(doc, pages)
+            for i in target_pages:
+                page = doc.pages[i]
+                width, height = _page_size(page)
+                crop_left = _clamp(left, 0.0, width - 1.0)
+                crop_right = _clamp(right, 0.0, width - crop_left - 1.0)
+                crop_bottom = _clamp(bottom, 0.0, height - 1.0)
+                crop_top = _clamp(top, 0.0, height - crop_bottom - 1.0)
+                x0 = crop_left
+                y0 = crop_bottom
+                x1 = max(x0 + 1.0, width - crop_right)
+                y1 = max(y0 + 1.0, height - crop_top)
+                page.CropBox = pikepdf.Array([x0, y0, x1, y1])
+            doc.save(output_path)
+    except pikepdf.PasswordError as exc:
+        raise PdfEngineError(f"'{input_path.name}' is password-protected") from exc
+    except pikepdf.PdfError as exc:
+        raise PdfEngineError(f"'{input_path.name}' could not be cropped: {exc}") from exc
 
     return output_path
 

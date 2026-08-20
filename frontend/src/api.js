@@ -323,6 +323,36 @@ export function pageNumbersPath(paths, payload, options) {
   return postJson(`/organize/page-numbers?${params.toString()}`, { input_paths: paths }, options);
 }
 
+export function cropPdfUpload(files, payload, options) {
+  return postUpload("/organize/crop-pdf-upload", files, payload, options);
+}
+
+export function cropPdfPath(paths, payload, options) {
+  const params = new URLSearchParams();
+  params.set("pages", payload.pages || "");
+  params.set("left", String(payload.left ?? 0));
+  params.set("top", String(payload.top ?? 0));
+  params.set("right", String(payload.right ?? 0));
+  params.set("bottom", String(payload.bottom ?? 0));
+  return postJson(`/organize/crop-pdf?${params.toString()}`, { input_paths: paths }, options);
+}
+
+export function metadataViewPath(paths, options) {
+  return postJson("/organize/metadata-view", { input_paths: paths }, options);
+}
+
+export function metadataPath(paths, payload, options) {
+  return postJson("/organize/metadata", { input_paths: paths, ...payload }, options);
+}
+
+export function metadataViewUpload(files, options) {
+  return postUpload("/organize/metadata-view-upload", files, undefined, options);
+}
+
+export function metadataUpload(files, payload, options) {
+  return postUpload("/organize/metadata-upload", files, payload, options);
+}
+
 export function passwordProtectUpload(files, password, options) {
   return postUpload("/organize/password-protect-upload", files, { password }, options);
 }

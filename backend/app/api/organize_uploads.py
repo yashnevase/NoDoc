@@ -19,17 +19,21 @@ from app.api.organize_helpers import (
 )
 from app.api.organize_models import (
     ConvertResponse,
+    CropRequest,
     JobAcceptedResponse,
     MergeResponse,
     MultiOutputResponse,
     PreviewManifestResponse,
     PreviewResponse,
+    MetadataRequest,
     SignatureReport,
 )
 from app.services.organize_service import (
     add_image_watermark_file,
     add_page_numbers_file,
     add_text_watermark_file,
+    crop_pdf_file,
+    compress_pdf_file,
     cleanup_job_dir,
     create_upload_job_dir,
     delete_pages_file,
@@ -37,6 +41,7 @@ from app.services.organize_service import (
     extract_pages_file,
     images_to_pdf_files_to_output,
     inspect_signatures_file,
+    read_metadata_file,
     merge_files_to_output,
     password_protect_file,
     pdf_to_images_file,
@@ -45,6 +50,7 @@ from app.services.organize_service import (
     reverse_pages_file,
     rotate_pdf_file,
     safe_upload_output_path,
+    write_metadata_file,
     split_pdf_file,
 )
 from app.services.upload_service import save_upload, save_uploads
@@ -368,6 +374,152 @@ async def page_numbers_upload(
                 prefix=prefix,
                 suffix=suffix,
                 start=start,
+            )
+        )
+    except PdfEngineError as exc:
+        cleanup_job_dir(job_dir)
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/crop-pdf-upload", response_model=ConvertResponse | JobAcceptedResponse)
+async def crop_pdf_upload(
+    files: list[UploadFile] = File(...),
+    pages: str = Form(""),
+    left: float = Form(0.0),
+    top: float = Form(0.0),
+    right: float = Form(0.0),
+    bottom: float = Form(0.0),
+    async_job: bool = False,
+) -> ConvertResponse | JobAcceptedResponse:
+    if len(files) != 1:
+        raise HTTPException(status_code=400, detail="crop-pdf-upload expects exactly one PDF")
+
+    job_dir = create_upload_job_dir()
+    try:
+        target_path = await save_upload(files[0], job_dir, "input.pdf")
+        page_indices = parse_page_ranges(pages) if pages.strip() else None
+        if async_job:
+            return enqueue_job(
+                "crop_pdf_upload",
+                lambda progress: {
+                    "output_path": str(
+                        crop_pdf_file(
+                            target_path,
+                            page_indices=page_indices,
+                            left=left,
+                            top=top,
+                            right=right,
+                            bottom=bottom,
+                        )
+                    )
+                },
+            )
+        return convert_response(
+            crop_pdf_file(
+                target_path,
+                page_indices=page_indices,
+                left=left,
+                top=top,
+                right=right,
+                bottom=bottom,
+            )
+        )
+    except PdfEngineError as exc:
+        cleanup_job_dir(job_dir)
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/compress-pdf-upload", response_model=ConvertResponse | JobAcceptedResponse)
+async def compress_pdf_upload(
+    files: list[UploadFile] = File(...),
+    preset: str = Form("balanced"),
+    async_job: bool = False,
+) -> ConvertResponse | JobAcceptedResponse:
+    if len(files) != 1:
+        raise HTTPException(status_code=400, detail="compress-pdf-upload expects exactly one PDF")
+
+    job_dir = create_upload_job_dir()
+    try:
+        target_path = await save_upload(files[0], job_dir, "input.pdf")
+        if async_job:
+            return enqueue_job(
+                "compress_pdf_upload",
+                lambda progress: {
+                    "output_path": str(
+                        compress_pdf_file(
+                            target_path,
+                            preset=preset,
+                            on_progress=lambda value: progress(value, "Compressing PDF"),
+                        )
+                    )
+                },
+            )
+        return convert_response(compress_pdf_file(target_path, preset=preset))
+    except PdfEngineError as exc:
+        cleanup_job_dir(job_dir)
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/metadata-view-upload")
+async def metadata_view_upload(files: list[UploadFile] = File(...)) -> dict[str, object]:
+    if len(files) != 1:
+        raise HTTPException(status_code=400, detail="metadata-view-upload expects exactly one PDF")
+
+    job_dir = create_upload_job_dir()
+    try:
+        target_path = await save_upload(files[0], job_dir, "input.pdf")
+        return {"metadata": read_metadata_file(target_path)}
+    except PdfEngineError as exc:
+        cleanup_job_dir(job_dir)
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/metadata-upload", response_model=ConvertResponse | JobAcceptedResponse)
+async def metadata_upload(
+    files: list[UploadFile] = File(...),
+    title: str = Form(""),
+    author: str = Form(""),
+    subject: str = Form(""),
+    keywords: str = Form(""),
+    creator: str = Form(""),
+    producer: str = Form(""),
+    remove_all: bool = Form(False),
+    async_job: bool = False,
+) -> ConvertResponse | JobAcceptedResponse:
+    if len(files) != 1:
+        raise HTTPException(status_code=400, detail="metadata-upload expects exactly one PDF")
+
+    job_dir = create_upload_job_dir()
+    try:
+        target_path = await save_upload(files[0], job_dir, "input.pdf")
+        if async_job:
+            return enqueue_job(
+                "metadata_upload",
+                lambda progress: {
+                    "output_path": str(
+                        write_metadata_file(
+                            target_path,
+                            title=title,
+                            author=author,
+                            subject=subject,
+                            keywords=keywords,
+                            creator=creator,
+                            producer=producer,
+                            remove_all=remove_all,
+                        )
+                    )
+                },
+            )
+        return convert_response(
+            write_metadata_file(
+                target_path,
+                title=title,
+                author=author,
+                subject=subject,
+                keywords=keywords,
+                creator=creator,
+                producer=producer,
+                remove_all=remove_all,
             )
         )
     except PdfEngineError as exc:

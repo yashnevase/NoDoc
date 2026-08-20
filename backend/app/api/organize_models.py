@@ -80,6 +80,40 @@ class PageNumbersRequest(BaseModel):
         return value
 
 
+class CropRequest(BaseModel):
+    input_paths: list[str]
+    pages: str = ""
+    left: float = 0.0
+    top: float = 0.0
+    right: float = 0.0
+    bottom: float = 0.0
+
+    @field_validator("input_paths")
+    @classmethod
+    def non_empty(cls, value: list[str]) -> list[str]:
+        if len(value) != 1:
+            raise ValueError("crop-pdf expects exactly one input PDF")
+        return value
+
+
+class MetadataRequest(BaseModel):
+    input_paths: list[str]
+    title: str = ""
+    author: str = ""
+    subject: str = ""
+    keywords: str = ""
+    creator: str = ""
+    producer: str = ""
+    remove_all: bool = False
+
+    @field_validator("input_paths")
+    @classmethod
+    def non_empty(cls, value: list[str]) -> list[str]:
+        if len(value) != 1:
+            raise ValueError("metadata expects exactly one input PDF")
+        return value
+
+
 class SignatureField(BaseModel):
     name: str
     signed: bool
