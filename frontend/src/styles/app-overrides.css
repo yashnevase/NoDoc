@@ -1,0 +1,139 @@
+/* Final cascade: compact desktop chrome, reader-local controls, and reliable themed surfaces. */
+.titlebar { min-height: 52px; padding: 0.42rem 0.72rem; }
+.quick-actions { align-items: center; flex-wrap: nowrap; }
+.quick-actions > button { min-height: 30px; padding: 0.28rem 0.48rem; }
+.category-tabs { min-height: 34px; padding-inline: 0.6rem; }
+.category-tabs button { font-size: 0.8rem; min-height: 30px; padding: 0.2rem 0.7rem 0.3rem; }
+.ribbon { align-items: center; gap: 0.5rem; grid-template-columns: minmax(0, 1fr) auto; min-height: 52px; padding: 0.35rem 0.65rem; }
+.ribbon-tools { display: flex; gap: 0.25rem; min-width: 0; overflow-x: auto; padding-bottom: 0.08rem; scrollbar-width: thin; }
+.tool-button { flex: 0 0 auto; gap: 0.32rem; grid-auto-flow: column; min-height: 34px; padding: 0.25rem 0.45rem; }
+.tool-button svg { height: 16px; width: 16px; }
+.tool-button span { font-size: 0.73rem; white-space: nowrap; }
+.ribbon-settings { align-items: center; border-left: 1px solid var(--line-soft); display: flex; gap: 0.45rem; min-width: 0; padding-left: 0.55rem; }
+.ribbon-action-row { flex-wrap: nowrap; }
+.compact-workflow { align-items: center; display: flex; gap: 0.36rem; min-width: 0; }
+.compact-workflow strong { color: var(--muted); font-size: 0.72rem; max-width: 115px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.workspace { gap: 0.65rem; grid-template-columns: 214px minmax(0, 1fr); padding: 0.65rem; }
+.document-header { min-height: 48px; padding: 0.45rem 0.72rem; }
+.preview-panel { padding: 0.65rem; }
+.reader-panel { flex: 1; margin-bottom: 0; }
+.reader-summary { align-items: center; display: grid; gap: 0.55rem; grid-template-columns: minmax(120px, 1fr) auto auto; padding: 0.5rem 0.65rem; }
+.reader-controls { align-items: center; display: flex; gap: 0.24rem; }
+.reader-controls button { min-height: 28px; padding: 0.2rem 0.42rem; }
+.reader-controls button:last-child, .reader-controls button:nth-last-child(3) { font-size: 1rem; min-width: 28px; padding-inline: 0.25rem; }
+.reader-page-count { color: var(--muted); font-size: 0.72rem; min-width: 38px; text-align: center; }
+.reader-layout { flex: 1; grid-template-columns: 82px minmax(0, 1fr); }
+.reader-strip, .reader-canvas { max-height: none; }
+.reader-canvas { border-radius: 12px; padding: 0.75rem; }
+.statusbar { min-height: 30px; padding: 0.25rem 0.65rem; }
+
+:root[data-theme="dark"] input, :root[data-theme="dark"] select, :root[data-theme="dark"] textarea,
+:root[data-theme="dark"] .watermark-editor, :root[data-theme="dark"] .crop-editor, :root[data-theme="dark"] .redact-editor,
+:root[data-theme="dark"] .signature-report, :root[data-theme="dark"] .signature-field-card, :root[data-theme="dark"] .metadata-editor,
+:root[data-theme="dark"] .ocr-hint, :root[data-theme="dark"] .ocr-textarea, :root[data-theme="dark"] .watermark-preview-shell,
+:root[data-theme="dark"] .crop-preview-shell, :root[data-theme="dark"] .redact-preview-shell, :root[data-theme="dark"] .redact-page-summary,
+:root[data-theme="dark"] .watermark-image-empty, :root[data-theme="dark"] .preview-toolbar, :root[data-theme="dark"] .panel-heading {
+  background: var(--panel) !important; border-color: var(--line-soft) !important; color: var(--ink) !important;
+}
+:root[data-theme="dark"] .field span, :root[data-theme="dark"] .preview-toolbar span, :root[data-theme="dark"] .watermark-preview-note { color: var(--muted); }
+:root[data-theme="dark"] .tool-button svg, :root[data-theme="dark"] .file-list li > svg { color: #d4d4d8; }
+:root[data-theme="dark"] .tool-button.is-active, :root[data-theme="dark"] .segmented-control button.is-active, :root[data-theme="dark"] .watermark-quick-angles button.is-active { background: rgba(176, 39, 48, 0.18); border-color: rgba(220, 103, 110, 0.52); color: #ffffff; }
+
+@media (max-width: 980px) {
+  .ribbon { grid-template-columns: minmax(0, 1fr); }
+  .ribbon-settings { border-left: 0; border-top: 1px solid var(--line-soft); justify-content: space-between; padding-left: 0; padding-top: 0.4rem; }
+  .workspace { grid-template-columns: 1fr; }
+}
+
+@media (max-width: 700px) {
+  .app-shell { height: auto; min-height: 100vh; overflow: visible; }
+  .titlebar { align-items: flex-start; flex-direction: column; }
+  .quick-actions { max-width: 100%; overflow-x: auto; width: 100%; }
+  .quick-actions > button span { display: none; }
+  .ribbon-settings { align-items: flex-start; flex-direction: column; }
+  .ribbon-action-row { flex-wrap: wrap; }
+  .reader-summary { align-items: stretch; grid-template-columns: 1fr; }
+  .reader-controls { flex-wrap: wrap; }
+  .reader-layout { grid-template-columns: 1fr; }
+  .reader-strip { grid-auto-columns: 72px; grid-auto-flow: column; max-height: 104px; overflow-x: auto; overflow-y: hidden; }
+}
+
+/* Continuous document canvas: pages scroll naturally like a desktop PDF viewer. */
+.reader-canvas {
+  align-items: center;
+  display: flex;
+  flex-direction: column;
+  gap: 1.35rem;
+  justify-items: initial;
+  scroll-behavior: smooth;
+}
+
+.reader-paper {
+  flex: 0 0 auto;
+  border-radius: 0;
+  scroll-margin-top: 0.6rem;
+  transition: box-shadow 140ms ease;
+}
+
+.reader-paper.is-current {
+  box-shadow: 0 14px 30px rgba(20, 20, 24, 0.16);
+}
+
+:root[data-theme="dark"] .settings-drawer,
+:root[data-theme="dark"] .settings-section,
+:root[data-theme="dark"] .settings-list li {
+  background: var(--panel);
+  border-color: var(--line-soft);
+  color: var(--ink);
+}
+
+:root[data-theme="dark"] .settings-list-main span,
+:root[data-theme="dark"] .settings-list-main em,
+:root[data-theme="dark"] .settings-note,
+:root[data-theme="dark"] .settings-header p {
+  color: var(--muted);
+}
+
+:root[data-theme="dark"] .settings-overlay {
+  background: rgba(0, 0, 0, 0.58);
+}
+
+/* Dark-mode contrast: chrome is bright and legible while document pages remain unchanged. */
+:root[data-theme="dark"] {
+  --brand: #e14c55;
+  --brand-dark: #ffabb0;
+  --brand-soft: rgba(225, 76, 85, 0.2);
+}
+
+:root[data-theme="dark"] button,
+:root[data-theme="dark"] button svg,
+:root[data-theme="dark"] .tool-button span,
+:root[data-theme="dark"] .page-thumb span,
+:root[data-theme="dark"] .reader-strip-item span,
+:root[data-theme="dark"] .page-thumb-order,
+:root[data-theme="dark"] .page-thumb-order::after,
+:root[data-theme="dark"] .page-thumb-hint,
+:root[data-theme="dark"] .state-pill.is-ready,
+:root[data-theme="dark"] .preview-meta span {
+  color: #f6f6f8;
+}
+
+:root[data-theme="dark"] .page-thumb-order,
+:root[data-theme="dark"] .page-thumb-hint,
+:root[data-theme="dark"] .preview-meta span,
+:root[data-theme="dark"] .state-pill.is-ready {
+  background: rgba(255, 255, 255, 0.1);
+  border-color: rgba(255, 255, 255, 0.18);
+}
+
+:root[data-theme="dark"] .tool-button.is-active,
+:root[data-theme="dark"] .category-tabs button.is-active,
+:root[data-theme="dark"] .segmented-control button.is-active {
+  color: #ffffff;
+}
+
+:root[data-theme="dark"] .tool-button.is-active svg,
+:root[data-theme="dark"] .category-tabs button.is-active svg,
+:root[data-theme="dark"] .primary-action svg {
+  color: #ffffff;
+}

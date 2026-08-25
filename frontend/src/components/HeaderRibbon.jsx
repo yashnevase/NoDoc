@@ -1,6 +1,4 @@
-import { canUseDesktopBridge } from "../api";
 import { groups, readyToolIds } from "../config/tools";
-import { clamp, pathFolder, pathName } from "../utils/fileHelpers";
 import { Icon } from "./Icon";
 
 export function HeaderRibbon({
@@ -12,21 +10,13 @@ export function HeaderRibbon({
   chooseGroup,
   chooseTool,
   compressPreset,
-  currentReaderIndex,
-  exportResultsToFolder,
   fileItems,
   handleDownloadOne,
   handleDownloadZip,
   handleHealthCheck,
-  handleRevealPath,
   isBusy,
-  loadPathItems,
   openFiles,
-  outputFolder,
-  pagePreview,
   password,
-  readerActive,
-  readerZoom,
   resultPaths,
   rotateScope,
   rotation,
@@ -34,14 +24,14 @@ export function HeaderRibbon({
   selectionLabel,
   setCompressPreset,
   setPassword,
-  setReaderPageIndex,
-  setReaderZoom,
   setRotateScope,
   setRotation,
   setShowSettings,
   showCancelAction,
   sourceMode,
   status,
+  themeMode,
+  setThemeMode,
 }) {
   return (
     <>
@@ -62,6 +52,27 @@ export function HeaderRibbon({
             <Icon name="reload" />
             <span>Engine</span>
           </button>
+          <button type="button" onClick={() => chooseGroup("tools")} disabled={isBusy || !fileItems.length} title="Open document reader">
+            <Icon name="reader" />
+            <span>View</span>
+          </button>
+          <div className="theme-switcher" aria-label="Appearance">
+            {[
+              { id: "light", label: "Light" },
+              { id: "system", label: "System" },
+              { id: "dark", label: "Dark" },
+            ].map((theme) => (
+              <button
+                className={themeMode === theme.id ? "is-active" : ""}
+                key={theme.id}
+                type="button"
+                onClick={() => setThemeMode(theme.id)}
+                title={`${theme.label} appearance`}
+              >
+                {theme.label}
+              </button>
+            ))}
+          </div>
           <button type="button" onClick={() => setShowSettings(true)} disabled={isBusy} title="Open settings">
             <Icon name="settings" />
             <span>Settings</span>
@@ -95,51 +106,14 @@ export function HeaderRibbon({
             >
               <Icon name={tool.icon} />
               <span>{tool.title}</span>
-              <em>{tool.status === "ready" ? tool.needs : "Later"}</em>
             </button>
           ))}
         </div>
 
         <div className="ribbon-settings">
-          <div className="workflow-card">
-            <div className="workflow-status">
-              <span className={`state-pill ${isBusy ? "is-planned" : "is-ready"}`}>{actionLabel}</span>
-              <strong>{selectionLabel || (fileItems.length ? `${fileItems.length} file${fileItems.length === 1 ? "" : "s"} loaded` : "Drop or open files")}</strong>
-            </div>
-            <p>{status}</p>
-            {resultPaths.length > 0 && (
-              <div className="workflow-downloads">
-                {resultPaths.length === 1 ? (
-                  <button type="button" onClick={() => handleDownloadOne(resultPaths[0])} disabled={isBusy}>
-                    <Icon name="download" />
-                    <span>Download file</span>
-                  </button>
-                ) : (
-                  <button type="button" onClick={handleDownloadZip} disabled={isBusy}>
-                    <Icon name="download" />
-                    <span>Download ZIP</span>
-                  </button>
-                )}
-                <span>{resultPaths.length ? `${resultPaths.length} file${resultPaths.length === 1 ? "" : "s"} ready` : "No result yet"}</span>
-                {canUseDesktopBridge() && outputFolder ? (
-                  <button type="button" onClick={() => void exportResultsToFolder()} disabled={isBusy}>
-                    <Icon name="folder" />
-                    <span>Export</span>
-                  </button>
-                ) : null}
-                <button type="button" onClick={() => loadPathItems(resultPaths, "Loaded result into workspace")} disabled={isBusy}>
-                  <Icon name="openExternal" />
-                  <span>Use result</span>
-                </button>
-                {canUseDesktopBridge() ? (
-                  <button type="button" onClick={() => void handleRevealPath(resultPaths[0] || outputFolder || pathFolder(resultPaths[0] || ""))} disabled={isBusy}>
-                    <Icon name="folder" />
-                    <span>Show folder</span>
-                  </button>
-                ) : null}
-                <span>{resultPaths.slice(0, 3).map((path) => pathName(path)).join(", ")}</span>
-              </div>
-            )}
+          <div className="workflow-status compact-workflow" title={status}>
+            <span className={`state-pill ${isBusy ? "is-planned" : "is-ready"}`}>{actionLabel}</span>
+            <strong>{selectionLabel || (fileItems.length ? `${fileItems.length} file${fileItems.length === 1 ? "" : "s"}` : "No file")}</strong>
           </div>
 
           <div className="ribbon-action-row">
@@ -214,47 +188,7 @@ export function HeaderRibbon({
               </div>
             )}
 
-            {readerActive && (
-              <>
-                <div className="segmented-control reader-nav-control" aria-label="Reader navigation">
-                  <button
-                    type="button"
-                    onClick={() => setReaderPageIndex((current) => clamp(current - 1, 0, Math.max(0, pagePreview.length - 1)))}
-                    disabled={isBusy || currentReaderIndex <= 0}
-                  >
-                    <span>Prev</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setReaderPageIndex((current) => clamp(current + 1, 0, Math.max(0, pagePreview.length - 1)))}
-                    disabled={isBusy || currentReaderIndex >= pagePreview.length - 1}
-                  >
-                    <span>Next</span>
-                  </button>
-                </div>
-
-                <div className="segmented-control reader-zoom-control" aria-label="Reader zoom">
-                  {[
-                    { value: 0.9, label: "Fit" },
-                    { value: 1, label: "100%" },
-                    { value: 1.25, label: "125%" },
-                    { value: 1.5, label: "150%" },
-                  ].map((zoom) => (
-                    <button
-                      className={Math.abs(readerZoom - zoom.value) < 0.01 ? "is-active" : ""}
-                      key={zoom.label}
-                      type="button"
-                      onClick={() => setReaderZoom(zoom.value)}
-                      disabled={isBusy}
-                    >
-                      <span>{zoom.label}</span>
-                    </button>
-                  ))}
-                </div>
-              </>
-            )}
-
-            {!readerActive && (
+            {activeTool !== "reader" && (
               <button className="primary-action" type="button" onClick={runActiveTool} disabled={isBusy}>
                 <Icon name="check" />
                 <span>{activeTool === "digital_sign" ? "Check" : readyToolIds.has(activeTool) ? "Apply" : "Planned"}</span>
@@ -266,6 +200,20 @@ export function HeaderRibbon({
                 <Icon name="close" />
                 <span>{isBusy ? "Cancel" : "Reset"}</span>
               </button>
+            )}
+
+            {resultPaths.length > 0 && (
+              resultPaths.length === 1 ? (
+                <button type="button" onClick={() => handleDownloadOne(resultPaths[0])} disabled={isBusy} title="Download completed file">
+                  <Icon name="download" />
+                  <span>Download</span>
+                </button>
+              ) : (
+                <button type="button" onClick={handleDownloadZip} disabled={isBusy} title="Download completed files as ZIP">
+                  <Icon name="download" />
+                  <span>ZIP</span>
+                </button>
+              )
             )}
           </div>
         </div>

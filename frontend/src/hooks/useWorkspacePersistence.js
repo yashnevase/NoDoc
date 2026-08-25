@@ -30,6 +30,7 @@ export function useWorkspacePersistence({
   setWatermarkPreset,
   setWatermarkScope,
   setWatermarkSize,
+  setThemeMode,
   outputFolder,
   watermarkAngle,
   watermarkColor,
@@ -39,6 +40,7 @@ export function useWorkspacePersistence({
   watermarkPreset,
   watermarkScope,
   watermarkSize,
+  themeMode,
 }) {
   useEffect(() => {
     const savedPreferences = window.localStorage.getItem(settingsKey);
@@ -87,6 +89,9 @@ export function useWorkspacePersistence({
         }
         if (typeof preferences.watermarkColor === "string") {
           setWatermarkColor(preferences.watermarkColor);
+        }
+        if (["light", "system", "dark"].includes(preferences.themeMode)) {
+          setThemeMode(preferences.themeMode);
         }
       } catch {
         window.localStorage.removeItem(settingsKey);
@@ -151,9 +156,10 @@ export function useWorkspacePersistence({
         watermarkSize,
         watermarkOpacity,
         watermarkColor,
+        themeMode,
       })
     );
-  }, [activeGroup, activeTool, readerZoom, rotation, compressPreset, rotateScope, watermarkScope, watermarkMode, watermarkPreset, watermarkPosition, watermarkAngle, watermarkSize, watermarkOpacity, watermarkColor]);
+  }, [activeGroup, activeTool, readerZoom, rotation, compressPreset, rotateScope, watermarkScope, watermarkMode, watermarkPreset, watermarkPosition, watermarkAngle, watermarkSize, watermarkOpacity, watermarkColor, themeMode]);
 
   useEffect(() => {
     if (outputFolder) {

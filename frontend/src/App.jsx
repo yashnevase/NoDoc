@@ -168,6 +168,7 @@ export default function App() {
   const [pageDragMode, setPageDragMode] = useState(null);
   const [reorderDragPage, setReorderDragPage] = useState(null);
   const [showSettings, setShowSettings] = useState(false);
+  const [themeMode, setThemeMode] = useState("system");
   const [jobHistory, setJobHistory] = useState([]);
   const [recentFiles, setRecentFiles] = useState([]);
   const [outputFolder, setOutputFolder] = useState("");
@@ -211,7 +212,6 @@ export default function App() {
     previewPageNumber,
     previewPaperStyle,
     readerPageLabel,
-    readerPaperStyle,
     topSpacerHeight,
     visiblePages,
     visibleStartIndex,
@@ -277,6 +277,7 @@ export default function App() {
     setWatermarkPreset,
     setWatermarkScope,
     setWatermarkSize,
+    setThemeMode,
     watermarkAngle,
     watermarkColor,
     watermarkMode,
@@ -285,7 +286,19 @@ export default function App() {
     watermarkPreset,
     watermarkScope,
     watermarkSize,
+    themeMode,
   });
+
+  useEffect(() => {
+    const media = window.matchMedia("(prefers-color-scheme: dark)");
+    const applyTheme = () => {
+      document.documentElement.dataset.theme = themeMode === "system" ? (media.matches ? "dark" : "light") : themeMode;
+      document.documentElement.dataset.themeMode = themeMode;
+    };
+    applyTheme();
+    media.addEventListener("change", applyTheme);
+    return () => media.removeEventListener("change", applyTheme);
+  }, [themeMode]);
   usePreviewViewport({
     activeTool,
     exactlyOnePdfSelected,
@@ -296,6 +309,8 @@ export default function App() {
   });
   useOpenedFiles({
     rememberRecentFiles,
+    setActiveGroup,
+    setActiveTool,
     setFileItems,
     setResult,
     setStatus,
@@ -399,6 +414,10 @@ export default function App() {
     }
     const nextItems = pathItems(cleanPaths);
     setFileItems(nextItems);
+    if (nextItems.length === 1 && nextItems[0].name.toLowerCase().endsWith(".pdf")) {
+      setActiveGroup("tools");
+      setActiveTool("reader");
+    }
     setResult(null);
     setSelectedPages([]);
     setPagePreview([]);
@@ -425,6 +444,10 @@ export default function App() {
   function updateFiles(files) {
     const nextItems = uploadItems(files);
     setFileItems(nextItems);
+    if (nextItems.length === 1 && nextItems[0].name.toLowerCase().endsWith(".pdf")) {
+      setActiveGroup("tools");
+      setActiveTool("reader");
+    }
     setResult(null);
     setDrawStrokes({});
     setActiveDrawPage(null);
@@ -456,6 +479,10 @@ export default function App() {
         }
         const nextItems = pathItems(paths);
         setFileItems(nextItems);
+        if (nextItems.length === 1 && nextItems[0].name.toLowerCase().endsWith(".pdf")) {
+          setActiveGroup("tools");
+          setActiveTool("reader");
+        }
         setResult(null);
         setDrawStrokes({});
         setActiveDrawPage(null);
@@ -950,11 +977,6 @@ export default function App() {
     setStatus("Search cleared");
   }
 
-  function openSearchResult(pageNumber) {
-    setReaderPageIndex(Math.max(0, pageNumber - 1));
-    setStatus(`Opened page ${pageNumber}`);
-  }
-
   function assertReady() {
     if (!readyToolIds.has(activeTool)) {
       return `${activeToolInfo?.title || "This tool"} is planned for later.`;
@@ -1416,21 +1438,13 @@ export default function App() {
         chooseGroup={chooseGroup}
         chooseTool={chooseTool}
         compressPreset={compressPreset}
-        currentReaderIndex={currentReaderIndex}
-        exportResultsToFolder={exportResultsToFolder}
         fileItems={fileItems}
         handleDownloadOne={handleDownloadOne}
         handleDownloadZip={handleDownloadZip}
         handleHealthCheck={handleHealthCheck}
-        handleRevealPath={handleRevealPath}
         isBusy={isBusy}
-        loadPathItems={loadPathItems}
         openFiles={() => void openFiles()}
-        outputFolder={outputFolder}
-        pagePreview={pagePreview}
         password={password}
-        readerActive={readerActive}
-        readerZoom={readerZoom}
         resultPaths={resultPaths}
         rotateScope={rotateScope}
         rotation={rotation}
@@ -1438,14 +1452,14 @@ export default function App() {
         selectionLabel={selectionLabel}
         setCompressPreset={setCompressPreset}
         setPassword={setPassword}
-        setReaderPageIndex={setReaderPageIndex}
-        setReaderZoom={setReaderZoom}
         setRotateScope={setRotateScope}
         setRotation={setRotation}
         setShowSettings={setShowSettings}
         showCancelAction={showCancelAction}
         sourceMode={sourceMode}
         status={status}
+        themeMode={themeMode}
+        setThemeMode={setThemeMode}
       />
 
       <section className="workspace">
@@ -1496,7 +1510,6 @@ export default function App() {
           previewSessionId={previewSessionId}
           readerActive={readerActive}
           readerPageLabel={readerPageLabel}
-          readerPaperStyle={readerPaperStyle}
           readerZoom={readerZoom}
           searchBusy={searchBusy}
           searchQuery={searchQuery}
@@ -1552,6 +1565,7 @@ export default function App() {
           setHighlightOpacity={setHighlightOpacity}
           setOcrLanguage={setOcrLanguage}
           setReaderPageIndex={setReaderPageIndex}
+          setReaderZoom={setReaderZoom}
           setSearchQuery={setSearchQuery}
           setRedactColor={setRedactColor}
           setReorderDragPage={setReorderDragPage}
@@ -1574,7 +1588,6 @@ export default function App() {
           signAllPages={signAllPages}
           textAllPages={textAllPages}
           topSpacerHeight={topSpacerHeight}
-          openSearchResult={openSearchResult}
           runReaderSearch={runReaderSearch}
           clearReaderSearch={clearReaderSearch}
           updateWatermarkImage={updateWatermarkImage}
@@ -1599,14 +1612,6 @@ export default function App() {
       </section>
 
       <StatusBar
-        exportResultsToFolder={exportResultsToFolder}
-        handleDownloadOne={handleDownloadOne}
-        handleDownloadZip={handleDownloadZip}
-        handleRevealPath={handleRevealPath}
-        isBusy={isBusy}
-        loadPathItems={loadPathItems}
-        outputFolder={outputFolder}
-        resultPaths={resultPaths}
         status={status}
       />
     </main>

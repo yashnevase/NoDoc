@@ -2,7 +2,7 @@ import { useEffect, useRef } from "react";
 
 import { pathItems } from "../utils/fileHelpers";
 
-export function useOpenedFiles({ rememberRecentFiles, setFileItems, setResult, setStatus }) {
+export function useOpenedFiles({ rememberRecentFiles, setActiveGroup, setActiveTool, setFileItems, setResult, setStatus }) {
   const rememberRecentFilesRef = useRef(rememberRecentFiles);
 
   useEffect(() => {
@@ -17,6 +17,10 @@ export function useOpenedFiles({ rememberRecentFiles, setFileItems, setResult, s
       }
       const nextItems = pathItems(openedPaths);
       setFileItems(nextItems);
+      if (nextItems.length === 1 && nextItems[0].name.toLowerCase().endsWith(".pdf")) {
+        setActiveGroup("tools");
+        setActiveTool("reader");
+      }
       setResult(null);
       rememberRecentFilesRef.current(nextItems.map((item) => item.name));
       setStatus(`Opened ${openedPaths.length} file${openedPaths.length === 1 ? "" : "s"} from Windows`);
@@ -25,5 +29,5 @@ export function useOpenedFiles({ rememberRecentFiles, setFileItems, setResult, s
     loadOpenedFiles();
     window.addEventListener("nodoc-ready", loadOpenedFiles);
     return () => window.removeEventListener("nodoc-ready", loadOpenedFiles);
-  }, [setFileItems, setResult, setStatus]);
+  }, [setActiveGroup, setActiveTool, setFileItems, setResult, setStatus]);
 }

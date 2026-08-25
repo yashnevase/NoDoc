@@ -48,7 +48,6 @@ export function DocumentPanel({
   previewSessionId,
   readerActive,
   readerPageLabel,
-  readerPaperStyle,
   readerZoom,
   searchBusy,
   searchQuery,
@@ -65,6 +64,7 @@ export function DocumentPanel({
   selectionLabel,
   setDropOverlayActive,
   setReaderPageIndex,
+  setReaderZoom,
   setSearchQuery,
   setReorderDragPage,
   setWatermarkAngle,
@@ -83,7 +83,6 @@ export function DocumentPanel({
   textAllPages,
   signAllPages,
   topSpacerHeight,
-  openSearchResult,
   runReaderSearch,
   clearReaderSearch,
   activeDrawPage,
@@ -178,7 +177,6 @@ export function DocumentPanel({
               previewBusy={previewBusy}
               previewSessionId={previewSessionId}
               readerPageLabel={readerPageLabel}
-              readerPaperStyle={readerPaperStyle}
               readerZoom={readerZoom}
               searchBusy={searchBusy}
               searchQuery={searchQuery}
@@ -186,7 +184,7 @@ export function DocumentPanel({
               searchSummary={searchSummary}
               setSearchQuery={setSearchQuery}
               setReaderPageIndex={setReaderPageIndex}
-              openSearchResult={openSearchResult}
+              setReaderZoom={setReaderZoom}
               runSearch={runReaderSearch}
               clearSearch={clearReaderSearch}
             />

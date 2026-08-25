@@ -23,12 +23,6 @@ export function useDocumentViewModel({
         maxHeight: "min(34vh, 280px)",
       }
     : undefined;
-  const readerPaperStyle = currentReaderPage
-    ? {
-        aspectRatio: `${Math.max(1, currentReaderPage.width)} / ${Math.max(1, currentReaderPage.height)}`,
-        width: `${Math.round(clamp(620 * readerZoom, 320, 1160))}px`,
-      }
-    : undefined;
 
   const pageGridItemHeight = 208;
   const pageGridGap = 14;
@@ -65,7 +59,6 @@ export function useDocumentViewModel({
     previewPageNumber,
     previewPaperStyle,
     readerPageLabel,
-    readerPaperStyle,
     topSpacerHeight: visibleStartRow * pageGridItemHeight,
     visiblePages: pagePreview.slice(visibleStartIndex, visibleEndIndex),
     visibleStartIndex,

@@ -1,0 +1,215 @@
+.category-tabs {
+  align-items: end;
+  background: linear-gradient(180deg, rgba(245, 245, 247, 0.96), rgba(233, 233, 236, 0.95));
+  border-bottom: 1px solid rgba(28, 28, 30, 0.12);
+  display: flex;
+  gap: 0.2rem;
+  min-height: 38px;
+  overflow-x: auto;
+  padding: 0 0.8rem;
+}
+
+.category-tabs button {
+  background: transparent;
+  border: 1px solid transparent;
+  border-bottom: 0;
+  border-radius: 10px 10px 0 0;
+  box-shadow: none;
+  color: #43434a;
+  min-height: 34px;
+  padding: 0.3rem 0.88rem 0.42rem;
+  white-space: nowrap;
+}
+
+.category-tabs button:hover {
+  background: rgba(255, 255, 255, 0.74);
+  border-color: rgba(28, 28, 30, 0.08);
+}
+
+.category-tabs button.is-active {
+  background: rgba(255, 255, 255, 0.98);
+  border-color: rgba(28, 28, 30, 0.1);
+  color: var(--ink);
+  font-weight: 700;
+  position: relative;
+}
+
+.category-tabs button.is-active::after {
+  background: var(--brand);
+  border-radius: 999px;
+  bottom: 0.25rem;
+  content: "";
+  height: 3px;
+  left: 0.8rem;
+  position: absolute;
+  right: 0.8rem;
+}
+
+.ribbon {
+  align-items: stretch;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(243, 243, 245, 0.96));
+  border-bottom: 1px solid rgba(28, 28, 30, 0.1);
+  box-shadow: 0 10px 20px rgba(21, 21, 24, 0.06);
+  display: grid;
+  gap: 0.6rem;
+  grid-template-columns: 1fr auto;
+  min-height: 104px;
+  padding: 0.6rem 0.75rem 0.7rem;
+  z-index: 2;
+}
+
+.ribbon-tools {
+  display: grid;
+  gap: 0.35rem;
+  grid-template-columns: repeat(auto-fit, minmax(72px, 1fr));
+}
+
+.tool-button {
+  align-content: center;
+  background: transparent;
+  border-color: transparent;
+  border-radius: 12px;
+  box-shadow: none;
+  display: grid;
+  gap: 0.15rem;
+  justify-items: center;
+  min-height: 72px;
+  padding: 0.35rem 0.25rem;
+  text-align: center;
+}
+
+.tool-button svg {
+  color: #3c3c42;
+  height: 21px;
+  transition: color 140ms ease, transform 180ms ease;
+  width: 21px;
+}
+
+.tool-button span {
+  font-size: 0.78rem;
+  font-weight: 650;
+  line-height: 1.1;
+}
+
+.tool-button em {
+  color: #777780;
+  font-size: 0.66rem;
+  font-style: normal;
+  line-height: 1.05;
+}
+
+.tool-button:hover {
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(250, 240, 241, 0.94));
+}
+
+.tool-button:hover svg {
+  color: var(--brand-dark);
+  transform: translateY(-1px);
+}
+
+.tool-button.is-active {
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.99), rgba(250, 238, 239, 0.97));
+  border-color: rgba(176, 39, 48, 0.2);
+  box-shadow: 0 0 0 1px rgba(176, 39, 48, 0.12), inset 0 1px 0 rgba(255, 255, 255, 0.88);
+}
+
+.tool-button.is-active svg {
+  color: var(--brand-dark);
+}
+
+.tool-button.is-planned {
+  color: #7b7f84;
+}
+
+.tool-button.is-planned svg {
+  color: #8e8e95;
+}
+
+.ribbon-settings {
+  align-content: center;
+  border-left: 1px solid rgba(28, 28, 30, 0.08);
+  display: grid;
+  gap: 0.45rem;
+  min-width: 320px;
+  padding-left: 0.7rem;
+}
+
+.workflow-card {
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(246, 246, 248, 0.97));
+  border: 1px solid rgba(28, 28, 30, 0.08);
+  border-radius: 14px;
+  box-shadow: var(--shadow-soft);
+  display: grid;
+  gap: 0.4rem;
+  padding: 0.55rem 0.65rem;
+}
+
+.workflow-status {
+  align-items: center;
+  display: flex;
+  gap: 0.5rem;
+  justify-content: space-between;
+  min-width: 0;
+}
+
+.workflow-status strong {
+  font-size: 0.84rem;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workflow-card p {
+  color: var(--muted);
+  font-size: 0.78rem;
+  margin-bottom: 0;
+}
+
+.workflow-downloads {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.workflow-downloads span {
+  color: #626a72;
+  font-size: 0.72rem;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ribbon-action-row {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.primary-action {
+  background: linear-gradient(180deg, var(--brand), var(--brand-dark));
+  border-color: rgba(90, 15, 21, 0.7);
+  box-shadow: 0 8px 18px rgba(127, 27, 34, 0.18);
+  color: #ffffff;
+  font-weight: 700;
+}
+
+.primary-action:hover {
+  background: linear-gradient(180deg, #c3353e, var(--brand-dark));
+  border-color: rgba(90, 15, 21, 0.74);
+}
+
+.secondary-action {
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(246, 240, 241, 0.98));
+  border-color: rgba(176, 39, 48, 0.22);
+  color: var(--brand-dark);
+  font-weight: 650;
+}
+
+.secondary-action:hover {
+  border-color: rgba(176, 39, 48, 0.34);
+}
+
