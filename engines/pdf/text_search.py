@@ -27,7 +27,7 @@ def search_text(input_path: Path, query: str, *, max_results: int = 80) -> dict[
             page = pdf[page_index]
             try:
                 text_page = page.get_textpage()
-                raw_text = text_page.get_text_range() or ""
+                raw_text = text_page.get_text_bounded() or ""
             finally:
                 page.close()
 
