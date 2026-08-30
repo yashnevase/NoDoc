@@ -902,8 +902,7 @@
     padding: 0.7rem;
   }
 
-  .reader-paper {
+  .reader-panel:not(.professional-reader) .reader-paper {
     width: min(100%, 92vw) !important;
   }
 }
-

@@ -1,12 +1,14 @@
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 
-import { canUseDesktopBridge, getJobHistory, getRecentFiles, saveRecentFiles } from "../api";
-import { groups, historyKey, outputFolderKey, recentFilesKey, settingsKey } from "../config/tools";
+import { canUseDesktopBridge, getJobHistory, getRecentFiles, saveRecentFiles, saveWorkspacePaths } from "../api";
+import { groups, historyKey, outputFolderKey, recentFilesKey, settingsKey, workspaceRecoveryKey } from "../config/tools";
 import { clamp, pathName, readStoredList } from "../utils/fileHelpers";
+import { serializeWorkspace } from "../utils/workspaceRecovery";
 
 export function useWorkspacePersistence({
   activeGroup,
   activeTool,
+  activeDocumentId,
   compressPreset,
   jobHistory,
   readerZoom,
@@ -41,7 +43,11 @@ export function useWorkspacePersistence({
   watermarkScope,
   watermarkSize,
   themeMode,
+  documentSessions,
+  documents,
+  restoreWorkspace,
 }) {
+  const workspaceHydrationRef = useRef(false);
   useEffect(() => {
     const savedPreferences = window.localStorage.getItem(settingsKey);
     if (savedPreferences) {
@@ -100,6 +106,44 @@ export function useWorkspacePersistence({
 
     setOutputFolder(window.localStorage.getItem(outputFolderKey) || "");
   }, []);
+
+  useEffect(() => {
+    if (!canUseDesktopBridge()) {
+      return;
+    }
+    try {
+      const snapshot = JSON.parse(window.localStorage.getItem(workspaceRecoveryKey) || "null");
+      workspaceHydrationRef.current = restoreWorkspace(snapshot);
+    } catch {
+      window.localStorage.removeItem(workspaceRecoveryKey);
+    }
+  }, [restoreWorkspace]);
+
+  useEffect(() => {
+    if (!canUseDesktopBridge()) {
+      return;
+    }
+    if (workspaceHydrationRef.current) {
+      workspaceHydrationRef.current = false;
+      return;
+    }
+    const snapshot = serializeWorkspace(documents, activeDocumentId, documentSessions);
+    if (!snapshot.documents.length) {
+      window.localStorage.removeItem(workspaceRecoveryKey);
+      return;
+    }
+    window.localStorage.setItem(workspaceRecoveryKey, JSON.stringify(snapshot));
+  }, [activeDocumentId, documentSessions, documents]);
+
+  useEffect(() => {
+    if (!canUseDesktopBridge()) {
+      return;
+    }
+    const revisionPaths = Object.values(documentSessions || []).flatMap((session) =>
+      (session.revisions || []).flatMap((revision) => revision.paths || [])
+    );
+    void saveWorkspacePaths(revisionPaths).catch(() => {});
+  }, [documentSessions]);
 
   useEffect(() => {
     async function loadPersistentState() {

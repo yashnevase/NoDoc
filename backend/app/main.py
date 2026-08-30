@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import logging
 import sys
+from contextlib import asynccontextmanager
 
 import uvicorn
 from fastapi import FastAPI
@@ -19,17 +20,24 @@ from app.api.library import router as library_router
 from app.api.results import router as results_router
 from app.config import settings
 from app.logging_conf import configure_logging
+from app.services.result_service import cleanup_stale_temp_outputs
 
 configure_logging()
 logger = logging.getLogger("privatepdf.main")
 
-app = FastAPI(title="PrivatePDF Sidecar", docs_url=None, redoc_url=None)
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    cleanup_stale_temp_outputs()
+    yield
+
+
+app = FastAPI(title="PrivatePDF Sidecar", docs_url=None, redoc_url=None, lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_origins=list(settings.cors_origins),
+    allow_credentials=False,
+    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_headers=["Content-Type", "X-PrivatePDF-Token"],
 )
 app.include_router(organize_router, prefix="/organize", tags=["organize"])
 app.include_router(library_router, tags=["library"])

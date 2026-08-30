@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import FileResponse
 
 from app.auth import require_token
 from app.api.organize_helpers import (
@@ -29,6 +30,7 @@ from app.api.organize_models import (
     HighlightRequest,
     MetadataRequest,
     OcrRequest,
+    OcrLanguagesResponse,
     OcrTextResponse,
     RedactRequest,
     JobAcceptedResponse,
@@ -53,6 +55,7 @@ from app.services.organize_service import (
     highlight_pdf_file,
     redact_pdf_file,
     ocr_text_file,
+    available_ocr_languages,
     searchable_pdf_file,
     search_text_file,
     read_metadata_file,
@@ -76,6 +79,14 @@ from engines.pdf.convert import render_pdf_manifest, render_pdf_page, render_pdf
 from engines.pdf.organize import PdfEngineError
 
 router = APIRouter(dependencies=[Depends(require_token)])
+
+
+@router.get("/ocr-languages", response_model=OcrLanguagesResponse)
+async def ocr_languages() -> OcrLanguagesResponse:
+    try:
+        return OcrLanguagesResponse(languages=available_ocr_languages())
+    except PdfEngineError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
 
 
 @router.post("/merge", response_model=MergeResponse | JobAcceptedResponse)
@@ -190,6 +201,15 @@ async def preview_page(preview_id: str | None = None, path: str | None = None, p
         return preview_page_response(render_pdf_page(preview_path, page, scale=scale))
     except PdfEngineError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.get("/preview-document")
+async def preview_document(preview_id: str) -> FileResponse:
+    """Return the source PDF for the authenticated in-app reader."""
+    preview_path = resolve_preview_session(preview_id, None)
+    if not preview_path.exists() or not preview_path.is_file():
+        raise HTTPException(status_code=404, detail="preview document not found")
+    return FileResponse(preview_path, media_type="application/pdf", filename=preview_path.name)
 
 
 @router.post("/extract-pages", response_model=ConvertResponse | JobAcceptedResponse)

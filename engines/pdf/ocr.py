@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import Callable
@@ -13,6 +14,9 @@ import pypdfium2 as pdfium
 from .organize import PdfEngineError
 
 
+_OCR_TIMEOUT_SECONDS = int(os.environ.get("PRIVATEPDF_OCR_TIMEOUT_SECONDS", "120"))
+
+
 def ocr_pdf_to_text(
     input_path: Path,
     output_path: Path,
@@ -21,6 +25,7 @@ def ocr_pdf_to_text(
     on_progress: Callable[[int], None] | None = None,
 ) -> dict[str, object]:
     binary = _resolve_tesseract_binary()
+    _validate_language(lang)
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
     try:
@@ -70,6 +75,7 @@ def ocr_pdf_to_searchable(
     on_progress: Callable[[int], None] | None = None,
 ) -> Path:
     binary = _resolve_tesseract_binary()
+    _validate_language(lang)
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
     try:
@@ -122,13 +128,73 @@ def _resolve_tesseract_binary() -> str:
         if configured_path.exists():
             return str(configured_path)
 
+    executable = "tesseract.exe" if os.name == "nt" else "tesseract"
+    for resource_root in _resource_roots():
+        for candidate in (resource_root / "ocr" / "bin" / executable, resource_root / "ocr" / executable):
+            if candidate.exists():
+                return str(candidate)
+
     discovered = shutil.which("tesseract")
     if discovered:
         return discovered
 
     raise PdfEngineError(
-        "Tesseract OCR engine not found. Install Tesseract or set PRIVATEPDF_TESSERACT_PATH."
+        "Tesseract OCR engine not found. Install Tesseract for development, set PRIVATEPDF_TESSERACT_PATH, or bundle it with NoDoc."
     )
+
+
+def available_ocr_languages() -> list[str]:
+    """Return installed OCR languages or a clear engine error for the UI/API."""
+    binary = _resolve_tesseract_binary()
+    try:
+        completed = subprocess.run(
+            [binary, "--list-langs"],
+            check=True,
+            capture_output=True,
+            text=True,
+            env=_tesseract_environment(),
+            timeout=_OCR_TIMEOUT_SECONDS,
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise PdfEngineError("Tesseract timed out while listing OCR languages") from exc
+    except subprocess.CalledProcessError as exc:
+        detail = exc.stderr.strip() or exc.stdout.strip() or str(exc)
+        raise PdfEngineError(f"Could not list OCR languages: {detail}") from exc
+    return [line.strip() for line in completed.stdout.splitlines() if line.strip() and not line.lower().startswith("list of")]
+
+
+def _resource_roots() -> list[Path]:
+    roots: list[Path] = []
+    configured = os.environ.get("PRIVATEPDF_RESOURCE_DIR")
+    if configured:
+        roots.append(Path(configured))
+    pyinstaller_root = getattr(sys, "_MEIPASS", None)
+    if pyinstaller_root:
+        roots.append(Path(pyinstaller_root))
+    return roots
+
+
+def _tesseract_environment() -> dict[str, str]:
+    environment = os.environ.copy()
+    configured = os.environ.get("PRIVATEPDF_TESSDATA_PATH")
+    candidates = [Path(configured)] if configured else []
+    candidates.extend(root / "ocr" / "tessdata" for root in _resource_roots())
+    for tessdata in candidates:
+        if tessdata.is_dir():
+            environment["TESSDATA_PREFIX"] = str(tessdata)
+            break
+    return environment
+
+
+def _validate_language(lang: str) -> None:
+    requested = [part.strip() for part in lang.split("+") if part.strip()]
+    if not requested:
+        raise PdfEngineError("OCR language must not be empty")
+    available = set(available_ocr_languages())
+    missing = [language for language in requested if language not in available]
+    if missing:
+        supported = ", ".join(sorted(available)) or "none"
+        raise PdfEngineError(f"OCR language unavailable: {', '.join(missing)}. Available languages: {supported}")
 
 
 def _run_tesseract_text(binary: str, image_path: Path, *, lang: str) -> str:
@@ -139,7 +205,11 @@ def _run_tesseract_text(binary: str, image_path: Path, *, lang: str) -> str:
             check=True,
             capture_output=True,
             text=True,
+            env=_tesseract_environment(),
+            timeout=_OCR_TIMEOUT_SECONDS,
         )
+    except subprocess.TimeoutExpired as exc:
+        raise PdfEngineError(f"OCR timed out for '{image_path.name}'") from exc
     except subprocess.CalledProcessError as exc:
         raise PdfEngineError(f"OCR failed for '{image_path.name}': {exc.stderr.strip() or exc.stdout.strip() or exc}") from exc
     return completed.stdout
@@ -153,7 +223,11 @@ def _run_tesseract_pdf(binary: str, image_path: Path, output_base: Path, *, lang
             check=True,
             capture_output=True,
             text=True,
+            env=_tesseract_environment(),
+            timeout=_OCR_TIMEOUT_SECONDS,
         )
+    except subprocess.TimeoutExpired as exc:
+        raise PdfEngineError(f"OCR PDF build timed out for '{image_path.name}'") from exc
     except subprocess.CalledProcessError as exc:
         raise PdfEngineError(f"OCR PDF build failed for '{image_path.name}': {exc.stderr.strip() or exc.stdout.strip() or exc}") from exc
     return output_base.with_suffix(".pdf")

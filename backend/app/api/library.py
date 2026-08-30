@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 from pydantic import BaseModel, Field
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
+
+from app.auth import require_token
 
 from app.services.job_history_service import (
     get_recent_files as load_recent_files,
@@ -9,7 +11,11 @@ from app.services.job_history_service import (
     save_recent_files as store_recent_files,
 )
 
-router = APIRouter(prefix="/library", tags=["library"])
+router = APIRouter(
+    prefix="/library",
+    tags=["library"],
+    dependencies=[Depends(require_token)],
+)
 
 
 class RecentFilesRequest(BaseModel):

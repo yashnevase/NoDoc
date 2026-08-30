@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 
 import { clamp } from "../utils/fileHelpers";
 import { LazyThumbImage } from "./LazyThumbImage";
+import { EditableRegion } from "./EditableRegion";
 
 function rectStyle(rect) {
   return {
@@ -30,6 +31,7 @@ export function HighlightEditor({
   pagePreview,
   previewSessionId,
   removeHighlightRect,
+  updateHighlightRect,
   selectedPages,
   setActiveHighlightPage,
   setHighlightColor,
@@ -130,13 +132,14 @@ export function HighlightEditor({
             )}
             <div className="redact-preview-overlay">
               {pageRegions.map((rect, index) => (
-                <button
+                <EditableRegion
                   key={`${activePageNumber}-${index}`}
-                  type="button"
                   className="highlight-region"
-                  style={{ ...rectStyle(rect), "--highlight-fill": highlightColor, "--highlight-opacity": highlightOpacity }}
-                  title={`Remove highlight box ${index + 1}`}
-                  onClick={() => removeHighlightRect(activePageNumber, index)}
+                  region={rect}
+                  style={{ "--highlight-fill": highlightColor, "--highlight-opacity": highlightOpacity }}
+                  title={`Highlight box ${index + 1}`}
+                  onChange={(next) => updateHighlightRect(activePageNumber, index, next)}
+                  onDelete={() => removeHighlightRect(activePageNumber, index)}
                 />
               ))}
               {draftRect && (

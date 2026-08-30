@@ -1,6 +1,7 @@
+import { lazy, Suspense } from "react";
+
 import { readyToolIds } from "../config/tools";
 import { PageGrid } from "./PageGrid";
-import { ReaderPanel } from "./ReaderPanel";
 import { CropEditor } from "./CropEditor";
 import { DrawEditor } from "./DrawEditor";
 import { HighlightEditor } from "./HighlightEditor";
@@ -12,7 +13,10 @@ import { SignatureEditor } from "./SignatureEditor";
 import { TextEditor } from "./TextEditor";
 import { WatermarkEditor } from "./WatermarkEditor";
 
+const ReaderPanel = lazy(() => import("./ReaderPanel").then((module) => ({ default: module.ReaderPanel })));
+
 export function DocumentPanel({
+  activeDocument,
   activeTool,
   activeToolInfo,
   beginPageDragSelection,
@@ -49,6 +53,7 @@ export function DocumentPanel({
   readerActive,
   readerPageLabel,
   readerZoom,
+  revisionStateLabel,
   searchBusy,
   searchQuery,
   searchResults,
@@ -60,6 +65,7 @@ export function DocumentPanel({
   rotateAppliesToAll,
   rotation,
   selectAllPages,
+  selectReaderPage,
   selectedPages,
   selectionLabel,
   setDropOverlayActive,
@@ -95,6 +101,7 @@ export function DocumentPanel({
   removeLastDrawStroke,
   clearHighlightsForPage,
   removeHighlightRect,
+  updateHighlightRect,
   setActiveDrawPage,
   setActiveHighlightPage,
   setDrawColor,
@@ -126,15 +133,18 @@ export function DocumentPanel({
   metadataForm,
   ocrEngineHint,
   ocrLanguage,
+  ocrLanguages,
   ocrPageCount,
   ocrTextPreview,
   loadMetadata,
+  beginDocumentEdit,
   removeAllMetadata,
   redactColor,
   redactRegions,
   activeRedactionPage,
   addRedactionRect,
   removeRedactionRect,
+  updateRedactionRect,
   clearRedactionsForPage,
   clearAllRedactions,
   setActiveRedactionPage,
@@ -143,13 +153,19 @@ export function DocumentPanel({
   setOcrLanguage,
   setCrop,
   setCropScope,
+  onOpenFiles,
 }) {
+  const stageDocumentEdit = (setter, key = "editor-control") => (value) => {
+    beginDocumentEdit(key);
+    setter(value);
+  };
+
   return (
     <section className="document-panel">
       <div className="document-header">
         <div>
-          <h1>{activeToolInfo?.title}</h1>
-          <p>{activeToolInfo?.detail}</p>
+          <h1>{activeDocument?.name || "No document"}</h1>
+          <p>{activeDocument ? `${readerActive ? "Reading" : `${activeToolInfo?.title}: ${activeToolInfo?.detail}`} · ${revisionStateLabel}` : "Local PDF workspace"}</p>
         </div>
         <span className={`state-pill ${readyToolIds.has(activeTool) ? "is-ready" : "is-planned"}`}>
           {readyToolIds.has(activeTool) ? "Ready" : "Planned"}
@@ -157,7 +173,7 @@ export function DocumentPanel({
       </div>
 
       {exactlyOnePdfSelected ? (
-        <div className="preview-panel">
+        <div className={`preview-panel document-workbench ${readerActive ? "is-reading" : "is-editing"}`}>
           <div className="panel-heading">
             <h2>Pages</h2>
             <div className="preview-meta">
@@ -168,15 +184,16 @@ export function DocumentPanel({
             </div>
           </div>
 
-          {readerActive && (
+          <Suspense fallback={<div className="reader-module-loading"><span /><p>Opening reader</p></div>}>
             <ReaderPanel
               currentReaderIndex={currentReaderIndex}
               currentReaderPage={currentReaderPage}
+              editMode={!readerActive}
               isBusy={isBusy}
+              onSelectPage={selectReaderPage}
               pagePreview={pagePreview}
               previewBusy={previewBusy}
               previewSessionId={previewSessionId}
-              readerPageLabel={readerPageLabel}
               readerZoom={readerZoom}
               searchBusy={searchBusy}
               searchQuery={searchQuery}
@@ -187,8 +204,11 @@ export function DocumentPanel({
               setReaderZoom={setReaderZoom}
               runSearch={runReaderSearch}
               clearSearch={clearReaderSearch}
+              selectedPages={selectedPages}
             />
-          )}
+          </Suspense>
+
+          {!readerActive && <aside className="edit-inspector">
 
           {pageToolActive && (
             <div className="preview-toolbar">
@@ -251,16 +271,16 @@ export function DocumentPanel({
               previewPaperStyle={previewPaperStyle}
               previewSessionId={previewSessionId}
               selectedPages={selectedPages}
-              setWatermarkAngle={setWatermarkAngle}
-              setWatermarkColor={setWatermarkColor}
-              setWatermarkImageFile={setWatermarkImageFile}
-              setWatermarkMode={setWatermarkMode}
-              setWatermarkOpacity={setWatermarkOpacity}
-              setWatermarkPosition={setWatermarkPosition}
-              setWatermarkPreset={setWatermarkPreset}
-              setWatermarkScope={setWatermarkScope}
-              setWatermarkSize={setWatermarkSize}
-              setWatermarkText={setWatermarkText}
+              setWatermarkAngle={stageDocumentEdit(setWatermarkAngle)}
+              setWatermarkColor={stageDocumentEdit(setWatermarkColor)}
+              setWatermarkImageFile={stageDocumentEdit(setWatermarkImageFile)}
+              setWatermarkMode={stageDocumentEdit(setWatermarkMode)}
+              setWatermarkOpacity={stageDocumentEdit(setWatermarkOpacity)}
+              setWatermarkPosition={stageDocumentEdit(setWatermarkPosition)}
+              setWatermarkPreset={stageDocumentEdit(setWatermarkPreset)}
+              setWatermarkScope={stageDocumentEdit(setWatermarkScope)}
+              setWatermarkSize={stageDocumentEdit(setWatermarkSize)}
+              setWatermarkText={stageDocumentEdit(setWatermarkText)}
               updateWatermarkImage={updateWatermarkImage}
               watermarkAllPages={watermarkAllPages}
               watermarkAngle={watermarkAngle}
@@ -290,12 +310,12 @@ export function DocumentPanel({
               previewPaperStyle={previewPaperStyle}
               previewSessionId={previewSessionId}
               selectedPages={selectedPages}
-              setWatermarkAngle={setWatermarkAngle}
-              setWatermarkImageFile={setWatermarkImageFile}
-              setWatermarkOpacity={setWatermarkOpacity}
-              setWatermarkPosition={setWatermarkPosition}
-              setWatermarkScope={setWatermarkScope}
-              setWatermarkSize={setWatermarkSize}
+              setWatermarkAngle={stageDocumentEdit(setWatermarkAngle)}
+              setWatermarkImageFile={stageDocumentEdit(setWatermarkImageFile)}
+              setWatermarkOpacity={stageDocumentEdit(setWatermarkOpacity)}
+              setWatermarkPosition={stageDocumentEdit(setWatermarkPosition)}
+              setWatermarkScope={stageDocumentEdit(setWatermarkScope)}
+              setWatermarkSize={stageDocumentEdit(setWatermarkSize)}
               updateWatermarkImage={updateWatermarkImage}
               watermarkAngle={watermarkAngle}
               watermarkImageFile={watermarkImageFile}
@@ -319,13 +339,13 @@ export function DocumentPanel({
               previewPaperStyle={previewPaperStyle}
               previewSessionId={previewSessionId}
               selectedPages={selectedPages}
-              setWatermarkAngle={setWatermarkAngle}
-              setWatermarkColor={setWatermarkColor}
-              setWatermarkOpacity={setWatermarkOpacity}
-              setWatermarkPosition={setWatermarkPosition}
-              setWatermarkScope={setWatermarkScope}
-              setWatermarkSize={setWatermarkSize}
-              setWatermarkText={setWatermarkText}
+              setWatermarkAngle={stageDocumentEdit(setWatermarkAngle)}
+              setWatermarkColor={stageDocumentEdit(setWatermarkColor)}
+              setWatermarkOpacity={stageDocumentEdit(setWatermarkOpacity)}
+              setWatermarkPosition={stageDocumentEdit(setWatermarkPosition)}
+              setWatermarkScope={stageDocumentEdit(setWatermarkScope)}
+              setWatermarkSize={stageDocumentEdit(setWatermarkSize)}
+              setWatermarkText={stageDocumentEdit(setWatermarkText)}
               textAllPages={textAllPages}
               watermarkAngle={watermarkAngle}
               watermarkColor={watermarkColor}
@@ -350,8 +370,8 @@ export function DocumentPanel({
               previewPaperStyle={previewPaperStyle}
               previewSessionId={previewSessionId}
               selectedPages={selectedPages}
-              setCrop={setCrop}
-              setCropScope={setCropScope}
+              setCrop={stageDocumentEdit(setCrop)}
+              setCropScope={stageDocumentEdit(setCropScope)}
             />
           )}
 
@@ -363,7 +383,7 @@ export function DocumentPanel({
               metadataForm={metadataForm}
               removeAllMetadata={removeAllMetadata}
               selectedPages={selectedPages}
-              setMetadataForm={setMetadataForm}
+              setMetadataForm={stageDocumentEdit(setMetadataForm)}
             />
           )}
 
@@ -373,6 +393,7 @@ export function DocumentPanel({
               isBusy={isBusy}
               ocrEngineHint={ocrEngineHint}
               ocrLanguage={ocrLanguage}
+              ocrLanguages={ocrLanguages}
               ocrPageCount={ocrPageCount}
               ocrTextPreview={ocrTextPreview}
               setOcrLanguage={setOcrLanguage}
@@ -391,9 +412,10 @@ export function DocumentPanel({
               redactColor={redactColor}
               redactRegions={redactRegions}
               removeRedactionRect={removeRedactionRect}
+              updateRedactionRect={updateRedactionRect}
               selectedPages={selectedPages}
               setActiveRedactionPage={setActiveRedactionPage}
-              setRedactColor={setRedactColor}
+              setRedactColor={stageDocumentEdit(setRedactColor, "redaction-style")}
             />
           )}
 
@@ -410,10 +432,11 @@ export function DocumentPanel({
               pagePreview={pagePreview}
               previewSessionId={previewSessionId}
               removeHighlightRect={removeHighlightRect}
+              updateHighlightRect={updateHighlightRect}
               selectedPages={selectedPages}
               setActiveHighlightPage={setActiveHighlightPage}
-              setHighlightColor={setHighlightColor}
-              setHighlightOpacity={setHighlightOpacity}
+              setHighlightColor={stageDocumentEdit(setHighlightColor, "highlight-style")}
+              setHighlightOpacity={stageDocumentEdit(setHighlightOpacity, "highlight-style")}
             />
           )}
 
@@ -433,9 +456,9 @@ export function DocumentPanel({
               removeLastDrawStroke={removeLastDrawStroke}
               selectedPages={selectedPages}
               setActiveDrawPage={setActiveDrawPage}
-              setDrawColor={setDrawColor}
-              setDrawOpacity={setDrawOpacity}
-              setDrawThickness={setDrawThickness}
+              setDrawColor={stageDocumentEdit(setDrawColor, "drawing-style")}
+              setDrawOpacity={stageDocumentEdit(setDrawOpacity, "drawing-style")}
+              setDrawThickness={stageDocumentEdit(setDrawThickness, "drawing-style")}
             />
           )}
 
@@ -471,12 +494,14 @@ export function DocumentPanel({
               visibleStartIndex={visibleStartIndex}
             />
           ) : null}
+          </aside>}
         </div>
       ) : (
         <div className="blank-canvas">
           <img src="/nodoc-logo.png" alt="NoDoc" />
-          <h2>{fileItems.length ? "Preview is ready when one PDF is selected" : "Drop files to begin"}</h2>
-          <p>Start in Convert for quick exports, then move to Organize for page work.</p>
+          <h2>{fileItems.length ? "Choose a PDF to start reading" : "Open a PDF and start reading"}</h2>
+          <p>{fileItems.length ? "Select a PDF from the document strip above." : "Files stay on this device."}</p>
+          <button type="button" className="primary-action" onClick={onOpenFiles}>Open PDF</button>
         </div>
       )}
     </section>

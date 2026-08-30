@@ -45,6 +45,15 @@ export function Icon({ name }) {
     settings: <><path d="M12 8.5a3.5 3.5 0 1 0 0 7a3.5 3.5 0 0 0 0-7z" /><path d="M19 12l2-1-1-3-2 .2-.9-1.6 1.2-1.7-2.2-2.2-1.7 1.2-1.6-.9.2-2-3-1-1 2h-1.8l-1-2-3 1 .2 2-1.6.9-1.7-1.2-2.2 2.2 1.2 1.7-.9 1.6-2-.2-1 3 2 1v1.8l-2 1 1 3 2-.2.9 1.6-1.2 1.7 2.2 2.2 1.7-1.2 1.6.9-.2 2 3 1 1-2h1.8l1 2 3-1-.2-2 1.6-.9 1.7 1.2 2.2-2.2-1.2-1.7.9-1.6 2 .2 1-3-2-1z" /></>,
     menu: <><path d="M4 7h16" /><path d="M4 12h16" /><path d="M4 17h16" /></>,
     history: <><path d="M12 7v5l3 2" /><path d="M5 12a7 7 0 1 0 2-4.9" /><path d="M5 4v4h4" /></>,
+    undo: <><path d="M9 7 5 11l4 4" /><path d="M5 11h8a6 6 0 0 1 6 6" /></>,
+    redo: <><path d="m15 7 4 4-4 4" /><path d="M19 11h-8a6 6 0 0 0-6 6" /></>,
+    chevronLeft: <><path d="M15 5l-7 7 7 7" /></>,
+    chevronRight: <><path d="M9 5l7 7-7 7" /></>,
+    zoomIn: <><circle cx="10" cy="10" r="5" /><path d="M14 14l5 5" /><path d="M10 7v6" /><path d="M7 10h6" /></>,
+    zoomOut: <><circle cx="10" cy="10" r="5" /><path d="M14 14l5 5" /><path d="M7 10h6" /></>,
+    fitWidth: <><path d="M4 6v12" /><path d="M20 6v12" /><path d="M7 12h10" /><path d="M9 9l-3 3 3 3" /><path d="M15 9l3 3-3 3" /></>,
+    fitPage: <><rect x="6" y="3" width="12" height="18" rx="1" /><path d="M9 8l-2 2" /><path d="M15 8l2 2" /><path d="M9 16l-2-2" /><path d="M15 16l2-2" /></>,
+    edit: <><path d="M4 20l4.5-1 10-10-3.5-3.5-10 10z" /><path d="M13.5 6.5l3.5 3.5" /></>,
   };
 
   return (

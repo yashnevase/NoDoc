@@ -5,7 +5,7 @@
   "identifier": "com.yashnevase.nodoc",
   "build": {
     "frontendDist": "../frontend/dist",
-    "devUrl": "http://localhost:5173"
+    "devUrl": "http://127.0.0.1:5173"
   },
   "app": {
     "windows": [
@@ -21,7 +21,7 @@
   },
   "bundle": {
     "active": true,
-    "targets": ["msi", "nsis"],
+    "targets": "all",
     "fileAssociations": [
       {
         "ext": ["pdf"],
@@ -83,7 +83,7 @@
         "upgradeCode": "9a01d6b6-2d31-5a69-a7c4-0c314cb2e0ab"
       }
     },
-    "resources": ["sidecar/nodoc-sidecar.exe"],
+    "resources": ["sidecar", "ocr"],
     "externalBin": []
   }
 }

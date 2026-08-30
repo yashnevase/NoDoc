@@ -1,21 +1,22 @@
-# Desktop shell (Tauri)
+# Desktop Shell (Tauri)
 
-NoDoc's desktop shell lives here. It is responsible for becoming the real
-Windows `.exe` wrapper around the React UI and Python sidecar.
+NoDoc's desktop shell wraps the React UI and the locally bundled Python
+sidecar for macOS and Windows.
 
-Responsible for:
-1. On startup: launch `backend/` (built via PyInstaller into a standalone
-   sidecar binary, see `build/pyinstaller/`), read the `PRIVATEPDF_PORT=`
-   line it prints to stdout, generate/relay the auth token to the frontend.
-2. On shutdown: terminate the sidecar process (no orphaned processes).
-3. Native file dialogs (open/save) — the only filesystem access path the
-   frontend gets is through these dialogs, never direct fs access.
+It is responsible for:
 
-CSP in tauri.conf.json intentionally allows `connect-src` only to
-`'self'` and `127.0.0.1:*` — the frontend cannot be coaxed into calling
-any remote host even if compromised via a malicious PDF's embedded content.
+1. Launching the platform-specific PyInstaller sidecar from `sidecar/`.
+2. Reading the sidecar `PRIVATEPDF_PORT=` startup line and relaying a fresh
+   per-session token to the frontend over Tauri IPC.
+3. Providing application-relative resource paths so bundled OCR can locate
+   Tesseract and `tessdata` without a developer-machine path.
+4. Native file, save, folder, and reveal dialogs.
+5. Draining sidecar stderr to app-local `logs/sidecar-stderr.log` and killing
+   the child when the app exits.
 
-Current status: the Tauri shell is scaffolded and ready for a Rust toolchain.
-The next desktop step is sidecar management: build `backend/` with PyInstaller,
-launch that binary from Rust, read its `PRIVATEPDF_PORT=` startup line, and pass
-the sidecar connection info to the frontend.
+The Tauri CSP permits connections only to the local sidecar. Release builds
+must supply `NODOC_OCR_BUNDLE_DIR`; the sidecar build intentionally fails
+without portable Tesseract and traineddata resources.
+
+Use the commands in the repository README to develop, package, sign, and test
+the desktop application on each target platform.

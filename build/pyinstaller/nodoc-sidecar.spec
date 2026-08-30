@@ -1,14 +1,20 @@
 # -*- mode: python ; coding: utf-8 -*-
 
+import os
 from pathlib import Path
 
 repo_root = Path(SPECPATH).parents[1]
+ocr_bundle = os.environ.get("NODOC_OCR_BUNDLE_DIR")
+ocr_bundle_dir = Path(ocr_bundle) if ocr_bundle else None
+datas = []
+if ocr_bundle_dir and ocr_bundle_dir.is_dir():
+    datas.append((str(ocr_bundle_dir), "ocr"))
 
 a = Analysis(
     [str(repo_root / "backend" / "app" / "main.py")],
     pathex=[str(repo_root), str(repo_root / "backend")],
     binaries=[],
-    datas=[],
+    datas=datas,
     hiddenimports=["app.api.organize", "app.api.results"],
     hookspath=[],
     hooksconfig={},

@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 
 import { clamp } from "../utils/fileHelpers";
 import { LazyThumbImage } from "./LazyThumbImage";
+import { EditableRegion } from "./EditableRegion";
 
 function rectStyle(rect) {
   return {
@@ -29,6 +30,7 @@ export function RedactEditor({
   redactColor,
   redactRegions,
   removeRedactionRect,
+  updateRedactionRect,
   selectedPages,
   setActiveRedactionPage,
   setRedactColor,
@@ -128,13 +130,13 @@ export function RedactEditor({
             )}
             <div className="redact-preview-overlay">
               {pageRegions.map((rect, index) => (
-                <button
+                <EditableRegion
                   key={`${activePageNumber}-${index}`}
-                  type="button"
                   className="redact-region"
-                  style={rectStyle(rect)}
-                  title={`Remove redaction box ${index + 1}`}
-                  onClick={() => removeRedactionRect(activePageNumber, index)}
+                  region={rect}
+                  title={`Redaction box ${index + 1}`}
+                  onChange={(next) => updateRedactionRect(activePageNumber, index, next)}
+                  onDelete={() => removeRedactionRect(activePageNumber, index)}
                 />
               ))}
               {draftRect && <div className="redact-region is-draft" style={rectStyle(draftRect)} />}

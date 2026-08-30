@@ -10,6 +10,10 @@ if (-not (Test-Path $venvPython)) {
     throw "Virtual environment not found at $venvPython. Run 'python -m venv .venv' first."
 }
 
+if (-not $env:NODOC_OCR_BUNDLE_DIR -or -not (Test-Path $env:NODOC_OCR_BUNDLE_DIR)) {
+    throw "Set NODOC_OCR_BUNDLE_DIR to a portable OCR bundle containing bin\tesseract.exe and tessdata\eng.traineddata."
+}
+
 $env:PYTHONNOUSERSITE = "1"
 $env:PYINSTALLER_CONFIG_DIR = $pyInstallerConfig
 $env:APPDATA = $pyInstallerAppData

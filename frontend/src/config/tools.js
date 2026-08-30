@@ -4,13 +4,14 @@ export const settingsKey = "nodoc-ui-preferences";
 export const historyKey = "nodoc-job-history";
 export const recentFilesKey = "nodoc-recent-files";
 export const outputFolderKey = "nodoc-output-folder";
+export const workspaceRecoveryKey = "nodoc-workspace-recovery";
 
 export const groups = [
   {
     id: "convert",
     label: "Convert",
     tools: [
-      { id: "render", icon: "image", title: "PDF to JPG", detail: "PDF pages to PNG images", needs: "1 PDF", status: "ready" },
+      { id: "render", icon: "image", title: "PDF to PNG", detail: "Export PDF pages as PNG images", needs: "1 PDF", status: "ready" },
       { id: "images", icon: "pdf", title: "JPG to PDF", detail: "Images to one PDF", needs: "Images", status: "ready" },
       { id: "pdf_docx", icon: "word", title: "PDF to DOCX", detail: "High fidelity export", needs: "Later", status: "planned" },
       { id: "docx_pdf", icon: "pdf", title: "DOCX to PDF", detail: "Needs Office engine", needs: "Later", status: "planned" },
@@ -54,7 +55,7 @@ export const groups = [
       { id: "password", icon: "lock", title: "Password", detail: "Protect with password", needs: "1 PDF", status: "ready" },
       { id: "encrypt", icon: "shield", title: "Encryption", detail: "AES PDF encryption", needs: "Included", status: "planned" },
       { id: "permissions", icon: "key", title: "Permissions", detail: "Print and copy restrictions", needs: "Later", status: "planned" },
-      { id: "digital_sign", icon: "sign", title: "Signature Check", detail: "Inspect and validate signatures", needs: "1 PDF", status: "ready" },
+      { id: "digital_sign", icon: "sign", title: "Signature Detection", detail: "Inspect signature fields and structure", needs: "1 PDF", status: "ready" },
     ],
   },
   {

@@ -20,6 +20,7 @@ from engines.pdf.draw import draw_strokes as engine_draw_strokes
 from engines.pdf.highlight import highlight_pages as engine_highlight_pages
 from engines.pdf.ocr import ocr_pdf_to_searchable as engine_ocr_pdf_to_searchable
 from engines.pdf.ocr import ocr_pdf_to_text as engine_ocr_pdf_to_text
+from engines.pdf.ocr import available_ocr_languages as engine_available_ocr_languages
 from engines.pdf.organize import add_image_watermark as engine_add_image_watermark
 from engines.pdf.organize import add_text_watermark as engine_add_text_watermark
 from engines.pdf.organize import add_page_numbers as engine_add_page_numbers
@@ -46,7 +47,7 @@ def safe_output_path(first_input: Path, suffix: str) -> Path:
     Never returns a path equal to an existing user file unless it's already
     inside a processed/ output folder we created.
     """
-    out_dir = first_input.parent / "processed"
+    out_dir = first_input.parent if first_input.parent.name == "processed" else first_input.parent / "processed"
     out_dir.mkdir(parents=True, exist_ok=True)
     candidate = out_dir / f"{first_input.stem}_{suffix}.pdf"
 
@@ -105,6 +106,10 @@ def password_protect_file(input_path: Path, password: str) -> Path:
 
 def inspect_signatures_file(input_path: Path) -> dict[str, object]:
     return engine_inspect_signatures(input_path)
+
+
+def available_ocr_languages() -> list[str]:
+    return engine_available_ocr_languages()
 
 
 def search_text_file(input_path: Path, query: str) -> dict[str, object]:

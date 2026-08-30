@@ -3,7 +3,7 @@ export function SignatureReportView({ signatureBusy, signatureReport }) {
     <div className="signature-report">
       <div className="signature-report-head">
         <div>
-          <strong>Signature check</strong>
+          <strong>Signature structure</strong>
           <span>
             {signatureBusy
               ? "Inspecting document"
@@ -14,10 +14,10 @@ export function SignatureReportView({ signatureBusy, signatureReport }) {
         </div>
         <div className={`signature-pill is-${signatureReport?.status || "idle"}`}>
           {signatureBusy
-            ? "Checking"
+            ? "Inspecting"
             : signatureReport
               ? signatureReport.status === "signed"
-                ? "Signed"
+                ? "Structure found"
                 : signatureReport.status === "unsigned"
                   ? "Needs review"
                   : "None found"
@@ -33,10 +33,10 @@ export function SignatureReportView({ signatureBusy, signatureReport }) {
       ) : signatureReport ? (
         <div className="signature-report-body">
           <div className="signature-summary">
-            <strong>{signatureReport.document_signed ? "Signature present" : "No valid signature yet"}</strong>
+            <strong>{signatureReport.document_signed ? "Signature structure present" : "No signature structure present"}</strong>
             <p>
               {signatureReport.document_signed
-                ? "The file contains signature fields with ByteRange and Contents data."
+                ? "The file contains signature fields with ByteRange and Contents data. Certificate trust and cryptographic validity are not checked."
                 : signatureReport.signature_count
                   ? "Signature fields exist, but they are incomplete or need review."
                   : "No signature fields were detected in this document."}
@@ -49,7 +49,7 @@ export function SignatureReportView({ signatureBusy, signatureReport }) {
                   <div className="signature-field-head">
                     <strong>{field.name}</strong>
                     <span className={field.signed ? "is-signed" : "is-warning"}>
-                      {field.signed ? "Structure OK" : "Attention"}
+                      {field.signed ? "Structure present" : "Attention"}
                     </span>
                   </div>
                   <p>{field.filter || "No filter"}{field.subfilter ? ` | ${field.subfilter}` : ""}</p>

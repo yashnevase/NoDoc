@@ -3,6 +3,7 @@ export function OcrEditor({
   isBusy,
   ocrEngineHint,
   ocrLanguage,
+  ocrLanguages,
   ocrPageCount,
   ocrTextPreview,
   setOcrLanguage,
@@ -22,13 +23,19 @@ export function OcrEditor({
         <div className="crop-grid">
           <label className="field">
             <span>OCR language</span>
-            <input
-              type="text"
-              value={ocrLanguage}
-              onChange={(event) => setOcrLanguage(event.target.value)}
-              placeholder="eng"
-              disabled={isBusy}
-            />
+            {ocrLanguages?.length ? (
+              <select value={ocrLanguage} onChange={(event) => setOcrLanguage(event.target.value)} disabled={isBusy}>
+                {ocrLanguages.map((language) => <option key={language} value={language}>{language}</option>)}
+              </select>
+            ) : (
+              <input
+                type="text"
+                value={ocrLanguage}
+                onChange={(event) => setOcrLanguage(event.target.value)}
+                placeholder="eng"
+                disabled={isBusy}
+              />
+            )}
           </label>
           <div className="field">
             <span>Engine</span>

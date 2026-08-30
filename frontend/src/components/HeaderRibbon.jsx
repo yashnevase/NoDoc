@@ -3,10 +3,13 @@ import { Icon } from "./Icon";
 
 export function HeaderRibbon({
   actionLabel,
+  activeDocumentName,
   activeGroup,
   activeTool,
   activeTools,
   cancelCurrentWork,
+  canRedoDocument,
+  canUndoDocument,
   chooseGroup,
   chooseTool,
   compressPreset,
@@ -16,6 +19,7 @@ export function HeaderRibbon({
   handleHealthCheck,
   isBusy,
   openFiles,
+  redoDocumentChange,
   password,
   resultPaths,
   rotateScope,
@@ -31,30 +35,51 @@ export function HeaderRibbon({
   sourceMode,
   status,
   themeMode,
+  undoDocumentChange,
   setThemeMode,
 }) {
   return (
-    <>
+    <header className="app-header">
       <section className="titlebar">
         <div className="brand-lockup">
           <img src="/nodoc-logo.png" alt="NoDoc logo" />
           <div>
             <strong>NoDoc</strong>
-            <span>{sourceMode === "open-with" ? "Opened from Windows" : "Local workspace"}</span>
+            <span>{activeDocumentName || (sourceMode === "open-with" ? "Opened document" : "Local workspace")}</span>
           </div>
         </div>
         <div className="quick-actions">
-          <button type="button" onClick={openFiles} disabled={isBusy} title="Browse files">
+          <button type="button" onClick={openFiles} disabled={isBusy} title="Browse files" aria-label="Open documents">
             <Icon name="upload" />
             <span>Open</span>
           </button>
-          <button type="button" onClick={handleHealthCheck} disabled={isBusy} title="Check local engine">
+          <button type="button" onClick={undoDocumentChange} disabled={isBusy || !canUndoDocument} title="Undo (Cmd/Ctrl+Z)" aria-label="Undo document change">
+            <Icon name="undo" />
+          </button>
+          <button type="button" onClick={redoDocumentChange} disabled={isBusy || !canRedoDocument} title="Redo (Cmd/Ctrl+Shift+Z)" aria-label="Redo document change">
+            <Icon name="redo" />
+          </button>
+          {activeTool === "reader" && resultPaths.length === 1 && (
+            <button type="button" onClick={() => handleDownloadOne(resultPaths[0])} disabled={isBusy} title="Export the displayed revision" aria-label="Export current revision">
+              <Icon name="download" />
+              <span>Export</span>
+            </button>
+          )}
+          <button className="engine-action" type="button" onClick={handleHealthCheck} disabled={isBusy} title="Check local engine" aria-label="Check local engine">
             <Icon name="reload" />
             <span>Engine</span>
           </button>
-          <button type="button" onClick={() => chooseGroup("tools")} disabled={isBusy || !fileItems.length} title="Open document reader">
+          <button className={activeTool === "reader" ? "is-active" : ""} type="button" onClick={() => chooseGroup("tools")} disabled={isBusy || !fileItems.length} title="Read active document" aria-label="Read active document">
             <Icon name="reader" />
-            <span>View</span>
+            <span>Read</span>
+          </button>
+          <button type="button" onClick={() => chooseGroup("edit")} disabled={isBusy || !fileItems.length} title="Edit active document" aria-label="Edit active document">
+            <Icon name="edit" />
+            <span>Edit</span>
+          </button>
+          <button type="button" onClick={() => chooseGroup("organize")} disabled={isBusy || !fileItems.length} title="Document tools" aria-label="Document tools">
+            <Icon name="menu" />
+            <span>Tools</span>
           </button>
           <div className="theme-switcher" aria-label="Appearance">
             {[
@@ -73,13 +98,14 @@ export function HeaderRibbon({
               </button>
             ))}
           </div>
-          <button type="button" onClick={() => setShowSettings(true)} disabled={isBusy} title="Open settings">
+          <button type="button" onClick={() => setShowSettings(true)} disabled={isBusy} title="Open settings" aria-label="Open settings">
             <Icon name="settings" />
             <span>Settings</span>
           </button>
         </div>
       </section>
 
+      {fileItems.length > 0 && activeTool !== "reader" && <>
       <nav className="category-tabs" aria-label="Tool categories">
         {groups.map((group) => (
           <button
@@ -218,6 +244,7 @@ export function HeaderRibbon({
           </div>
         </div>
       </section>
-    </>
+      </>}
+    </header>
   );
 }

@@ -18,7 +18,7 @@ def redact_pages(
     *,
     regions: list[dict[str, float | int]],
     color: str = "#000000",
-    render_scale: float = 2.0,
+    render_scale: float = 3.0,
     on_progress: Callable[[int], None] | None = None,
 ) -> Path:
     if not regions:
@@ -34,10 +34,9 @@ def redact_pages(
 
     try:
         with pikepdf.open(input_path) as source:
-                with pikepdf.new() as target:
-                    for key, value in source.docinfo.items():
-                        target.docinfo[key] = str(value)
-
+            with pikepdf.new() as target:
+                for key, value in source.docinfo.items():
+                    target.docinfo[key] = str(value)
                 with TemporaryDirectory(prefix="nodoc-redact-") as temp_dir:
                     temp_root = Path(temp_dir)
                     total_pages = len(source.pages)

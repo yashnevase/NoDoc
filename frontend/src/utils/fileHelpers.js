@@ -7,6 +7,11 @@ export function pathName(path) {
   return path.split(/[\\/]/).pop() || path;
 }
 
+export function joinNativePath(folder, name) {
+  const separator = folder.includes("\\") && !folder.includes("/") ? "\\" : "/";
+  return `${String(folder).replace(/[\\/]+$/, "")}${separator}${name}`;
+}
+
 export function outputPathsFromResult(result) {
   if (result.output_path) {
     return [result.output_path];

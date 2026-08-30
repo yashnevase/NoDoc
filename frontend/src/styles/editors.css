@@ -261,6 +261,58 @@
   pointer-events: none;
 }
 
+.editable-region {
+  cursor: move;
+  outline: 0;
+  touch-action: none;
+}
+
+.editable-region.is-selected {
+  box-shadow: 0 0 0 2px #ffffff, 0 0 0 4px rgba(176, 39, 48, 0.85);
+}
+
+.editable-region-delete {
+  align-items: center;
+  background: #ffffff;
+  border: 1px solid rgba(18, 18, 18, 0.28);
+  border-radius: 50%;
+  color: #242426;
+  display: none;
+  height: 20px;
+  justify-content: center;
+  padding: 3px;
+  position: absolute;
+  right: -11px;
+  top: -11px;
+  width: 20px;
+  z-index: 2;
+}
+
+.editable-region-delete svg {
+  height: 12px;
+  width: 12px;
+}
+
+.editable-region.is-selected .editable-region-delete {
+  display: flex;
+}
+
+.editable-region-resize {
+  background: #ffffff;
+  border: 1px solid rgba(18, 18, 18, 0.58);
+  bottom: -5px;
+  cursor: nwse-resize;
+  display: none;
+  height: 10px;
+  position: absolute;
+  right: -5px;
+  width: 10px;
+}
+
+.editable-region.is-selected .editable-region-resize {
+  display: block;
+}
+
 .draw-preview-page {
   cursor: crosshair;
 }
@@ -938,4 +990,3 @@
     white-space: normal;
   }
 }
-

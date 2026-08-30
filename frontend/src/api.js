@@ -123,6 +123,15 @@ export async function checkHealth(options = {}) {
   return readJson(res);
 }
 
+export async function getOcrLanguages(options = {}) {
+  const { base, token } = sidecarBase();
+  const res = await fetch(`${base}/organize/ocr-languages`, {
+    headers: { "x-privatepdf-token": token },
+    signal: options.signal,
+  });
+  return readJson(res);
+}
+
 export async function getRecentFiles(options = {}) {
   const { base, token } = sidecarBase();
   const res = await fetch(`${base}/library/recent`, {
@@ -168,6 +177,14 @@ export async function getJobStatus(jobId, options = {}) {
     signal: options.signal,
   });
   return readJson(res);
+}
+
+export function cancelJob(jobId, options = {}) {
+  return postJson(`/results/jobs/${encodeURIComponent(jobId)}/cancel`, {}, options);
+}
+
+export function saveWorkspacePaths(paths, options = {}) {
+  return postJson("/results/workspace", { paths }, options);
 }
 
 export function pickFilesDialog() {
@@ -528,6 +545,21 @@ export async function downloadResult(path) {
   await saveBlobResponse(res, path.split(/[\\/]/).pop() || "nodoc-result");
 }
 
+export async function fetchPreviewDocument(previewSessionId, options = {}) {
+  const { base, token } = sidecarBase();
+  const response = await fetch(
+    `${base}/organize/preview-document?preview_id=${encodeURIComponent(previewSessionId)}`,
+    {
+      headers: { "x-privatepdf-token": token },
+      signal: options.signal,
+    }
+  );
+  if (!response.ok) {
+    await throwResponseError(response);
+  }
+  return response.arrayBuffer();
+}
+
 export async function downloadZip(paths) {
   const { base, token } = sidecarBase();
   const res = await fetch(`${base}/results/zip`, {
@@ -539,4 +571,9 @@ export async function downloadZip(paths) {
     body: JSON.stringify({ paths }),
   });
   await saveBlobResponse(res, "nodoc-results.zip");
+}
+
+export function cleanupResults(paths, options = {}) {
+  const { releaseWorkspace = false, ...requestOptions } = options;
+  return postJson("/results/cleanup", { paths, release_workspace: releaseWorkspace }, requestOptions);
 }

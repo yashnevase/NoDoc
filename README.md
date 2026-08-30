@@ -1,138 +1,198 @@
 # NoDoc
 
-A free, offline, privacy-first PDF/document toolbox for Windows (macOS/Linux planned).
-Files never leave your device. No account, no API keys, no cloud processing.
+NoDoc is a local-first PDF workspace. It keeps PDF reading, page operations,
+editing, OCR, preview, and export on the user's computer. The React workspace
+talks only to a loopback Python sidecar protected by a per-session token; the
+Tauri shell supplies the token to the webview in desktop builds.
 
-## Status: Milestone 0 (architecture) — see docs/
+## What Works Today
 
-- `docs/ARCHITECTURE.md` — how the pieces fit together
-- `docs/FEATURE_MATRIX.md` — full feature list, tech choices, license notes
-- `docs/DEPENDENCY_INVENTORY.md` — every third-party dependency and its license
-- `docs/PRIVACY.md` — the privacy claims and how they're enforced
+- Open multiple PDFs, switch documents, read with PDF.js, search, select text,
+  navigate pages, zoom, fit, and use lazy thumbnails.
+- Edit a working revision with page targeting, page operations, text stamps,
+  watermarks, page numbers, drawing, highlights, secure redaction, and image
+  signature placement.
+- Commit a revision, preview the actual generated PDF, undo/redo per document,
+  continue editing, and export the exact displayed revision without replacing
+  the source PDF.
+- OCR text extraction and searchable-PDF output using local Tesseract.
+- Recover desktop path-based workspace metadata and committed working revision
+  references after a restart. Browser-uploaded `File` objects are intentionally
+  not persisted because browsers cannot safely restore their original paths.
 
-## Repository layout
+`Signature Detection` is structural only. It finds PDF signature fields and
+basic `ByteRange`/`Contents` markers. It does **not** perform certificate trust,
+revocation, or cryptographic signature validation, so NoDoc never calls a
+signature trusted or valid.
 
-```
-frontend/   React UI (Tauri webview)
-backend/    Python FastAPI sidecar (local loopback API only)
-engines/    Pure processing logic — pdf, images, ocr, office, compression, encryption, metadata
-desktop/    Tauri (Rust) shell — spawns/manages the sidecar
-tests/      pytest suite for engines + backend
-docs/       architecture, feature matrix, dependency inventory, privacy docs
-build/      packaging scripts (PyInstaller specs, installer config)
-```
+## Supported Development Versions
 
-## Running the backend tests
+- Node.js 22 LTS (`.nvmrc` and `frontend/package.json` enforce the target).
+- npm 10 or newer.
+- Python 3.10 through 3.12. This repository is tested here with Python 3.12;
+  Python 3.9 is unsupported.
+- Stable Rust, Cargo, and the Tauri system prerequisites for desktop builds.
+- Tesseract 5 with at least `eng` traineddata for OCR.
 
-```
-pip install -r backend/requirements.txt
-pytest
-```
+The checked-in Python requirements are pinned in `backend/requirements.txt`.
+PyInstaller is pinned separately in `build/requirements.txt`. The frontend
+uses the checked-in `frontend/package-lock.json`.
 
-## Local dev setup
+## Local macOS Startup
 
-Create and use a project-local virtual environment so backend logs, temp files,
-and test artifacts stay inside the repo during development:
+These commands run the web workspace from a fresh clone. They deliberately use
+one terminal for the sidecar and another for Vite so both processes stay easy
+to inspect.
 
-```powershell
-python -m venv .venv
-.\.venv\Scripts\python -m pip install -r backend/requirements.txt
-```
+### Install prerequisites
 
-For local runs in this repo, set `PRIVATEPDF_DATA_DIR` to a writable folder in
-the workspace:
-
-```powershell
-$env:PRIVATEPDF_DATA_DIR = "$PWD/.privatepdf-data"
-.\.venv\Scripts\python -m pytest -q
-```
-
-Convenience scripts are available at `scripts/test-backend.ps1` and
-`scripts/run-backend.ps1`.
-
-## Run locally
-
-Backend only:
-
-```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\run-backend.ps1
+```bash
+brew install node@22 python@3.12 tesseract poppler
+export PATH="$(brew --prefix node@22)/bin:$PATH"
+node --version
+python3.12 --version
+tesseract --list-langs
 ```
 
-That starts the sidecar on `http://127.0.0.1:8000` with a fixed local-dev token.
-You can verify it with:
+### Install project dependencies
 
-```powershell
-.\.venv\Scripts\python -c "import urllib.request; print(urllib.request.urlopen('http://127.0.0.1:8000/health').read().decode())"
+```bash
+cd /path/to/NoDoc
+python3.12 -m venv .venv
+source .venv/bin/activate
+python -m pip install --upgrade pip
+python -m pip install -r backend/requirements.txt -r build/requirements.txt
+(cd frontend && npm ci)
 ```
 
-Frontend dev screen:
+### Terminal 1 - backend
 
-```powershell
-cd frontend
-copy .env.example .env
-npm install
-npm run dev
+```bash
+cd /path/to/NoDoc
+source .venv/bin/activate
+./scripts/run-backend.sh
 ```
 
-Then open the Vite URL shown in the terminal. The current UI supports
-drag/drop, desktop file picking, page preview, progress polling for longer
-jobs, result history, and direct export/download actions.
+The backend listens at `http://127.0.0.1:8000` and prints its dynamic port when
+`PRIVATEPDF_PORT=0` is used. The development script uses port `8000` and token
+`dev-local-token` to match the frontend development environment.
 
-Current local tools:
+### Terminal 2 - frontend
 
-- Merge many PDFs into one PDF
-- Convert many images into one PDF
-- Split one PDF into one PDF per page
-- Convert one PDF into PNG page images
-- Extract selected pages into a new PDF
-- Delete selected pages from a PDF
-- Rotate all pages, or selected pages, in a PDF
-- Reorder pages by dragging preview cards
-- Password-protect a PDF
-- Repair and rewrite a PDF
-- Check PDF signature fields and signing status
-- Add text, badge, or image watermarks
-
-Desktop workflow extras currently implemented:
-
-- Native file open, save, and folder pickers through Tauri
-- Export finished outputs to a chosen folder
-- Reuse result files directly as the next workspace input
-- Open the containing folder for generated output files
-- Windows file association metadata for PDF, PNG, JPG, JPEG, WEBP, and BMP via the installer bundle
-
-## Desktop packaging path
-
-Windows sidecar build:
-
-```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\build-sidecar.ps1
+```bash
+cd /path/to/NoDoc
+export PATH="$(brew --prefix node@22)/bin:$PATH"
+./scripts/run-frontend.sh
 ```
 
-Desktop shell build, after Rust is installed:
+Open the Vite URL, normally `http://127.0.0.1:5173`.
 
-```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\build-desktop.ps1
+### Desktop/Tauri development
+
+Install Rust once, then open a new terminal so Cargo is on `PATH`:
+
+```bash
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain stable
+source "$HOME/.cargo/env"
+rustc --version
+cargo --version
 ```
 
-Windows installer packaging will use Tauri's `msi`/`nsis` targets. macOS `.dmg`
-should be built on macOS, and Linux packages should be built on Linux.
-
-Final Windows installer artifacts are written to:
+Create a portable, redistribution-ready OCR directory with this layout before
+building a desktop app. Do not point this at an arbitrary Homebrew install:
 
 ```text
-desktop\target\release\bundle\
+/path/to/nodoc-ocr-macos/
+  bin/tesseract
+  tessdata/eng.traineddata
+  ...all runtime libraries required by that tesseract binary
 ```
 
-Typical outputs there are:
+Then build and run through Tauri. The Tauri build starts the bundled sidecar;
+do not also run `run-backend.sh` on the same port.
 
-- `nsis\*.exe` — installer executable
-- `msi\*.msi` — Windows Installer package
+```bash
+cd /path/to/NoDoc
+source .venv/bin/activate
+export PATH="$(brew --prefix node@22)/bin:$HOME/.cargo/bin:$PATH"
+export NODOC_OCR_BUNDLE_DIR=/path/to/nodoc-ocr-macos
+./scripts/build-desktop.sh
+(cd frontend && npm run tauri -- dev)
+```
 
-The installed desktop app bundles the React frontend and the Python sidecar
-together, so end users do not run backend and frontend separately.
+## Clean Machine Setup
 
-## Development principles
+1. Install the prerequisites shown above.
+2. Clone the repository and run the dependency-install commands exactly once.
+3. Confirm `tesseract --list-langs` includes `eng` for web development.
+4. Use the two terminal commands for web development.
+5. For a distributable desktop build, use a portable OCR bundle rather than a
+   global Tesseract installation, then run `./scripts/build-desktop.sh`.
 
-Free. Private. Offline. Local. Simple. Reliable. Transparent. Maintainable.
-No forced accounts, no telemetry by default, no silent network calls, no fake/placeholder features.
+## Tests and Checks
+
+Run from the repository root:
+
+```bash
+PRIVATEPDF_DATA_DIR=/tmp/nodoc-tests .venv/bin/python -m pytest -q
+.venv/bin/python -m compileall -q backend/app engines
+(cd frontend && npm run build && npm test)
+(cd desktop && cargo check)
+```
+
+`cargo check` and desktop packaging require Rust. A macOS package is built on
+macOS and a Windows package is built on Windows. Tauri creates platform-native
+artifacts under `desktop/target/release/bundle/` when its build succeeds.
+
+## Desktop Packaging
+
+`scripts/build-sidecar.sh` produces the macOS/Linux sidecar and requires
+`NODOC_OCR_BUNDLE_DIR`. `scripts/build-sidecar.ps1` does the same for Windows
+and requires a directory containing `bin\\tesseract.exe` and
+`tessdata\\eng.traineddata`. The PyInstaller spec embeds this directory as
+application-relative `ocr/` resources. At runtime NoDoc resolves bundled OCR
+before `PRIVATEPDF_TESSERACT_PATH`, `TESSERACT_PATH`, or `PATH`.
+
+Build on the target platform:
+
+```bash
+# macOS
+export NODOC_OCR_BUNDLE_DIR=/path/to/nodoc-ocr-macos
+./scripts/build-desktop.sh
+```
+
+```powershell
+# Windows PowerShell
+$env:NODOC_OCR_BUNDLE_DIR = "C:\path\to\nodoc-ocr-windows"
+powershell -ExecutionPolicy Bypass -File .\scripts\build-windows-installer.ps1
+```
+
+The repository prepares `app`/`dmg` macOS and `msi`/`nsis` Windows targets.
+Code signing, macOS notarization, and Windows clean-machine verification still
+require the corresponding signing credentials and target hardware.
+
+## Security and Data Lifecycle
+
+- The sidecar binds to `127.0.0.1`, not a network interface.
+- Every document, result, library, and job endpoint except `/health` requires
+  the session token.
+- CORS accepts only the local Vite and Tauri origins by default. Override it
+  for deliberate development-only use with `PRIVATEPDF_CORS_ORIGINS`.
+- Upload names are sanitized, confined to a per-job directory, and streamed
+  with an enforced `PRIVATEPDF_MAX_UPLOAD_MB` limit (default 2048 MB).
+- Temporary job directories and downloads older than seven days are removed on
+  sidecar startup. Desktop active working revisions are registered with the
+  sidecar and protected from that cleanup until a user closes or clears their
+  document; normal export never overwrites the original.
+- A queued job cancels immediately. A running job becomes `cancelling` and is
+  cancelled at the next engine progress checkpoint; any returned output is
+  discarded instead of being presented as successful.
+
+## OCR Languages
+
+NoDoc asks Tesseract for installed languages and displays them in the OCR
+editor. The development Mac currently exposes `eng`, `osd`, and `snum`. A
+requested missing language fails clearly and lists the available choices.
+Bundle only product-supported traineddata files. Tesseract and `tessdata`
+licensing must be reviewed before redistribution; English is the release
+baseline.

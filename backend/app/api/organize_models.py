@@ -274,6 +274,10 @@ class OcrTextResponse(BaseModel):
     page_count: int
 
 
+class OcrLanguagesResponse(BaseModel):
+    languages: list[str]
+
+
 class PreviewPage(BaseModel):
     page: int
     width: float

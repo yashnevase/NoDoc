@@ -4,7 +4,11 @@ the merge endpoint end-to-end, without a running network server.
 """
 from __future__ import annotations
 
+import asyncio
+from io import BytesIO
+import os
 from pathlib import Path
+from threading import Event
 import time
 
 import pikepdf
@@ -12,9 +16,13 @@ import pypdfium2 as pdfium
 import pytest
 from fastapi.testclient import TestClient
 from PIL import Image
+from starlette.datastructures import UploadFile
 
 from app.config import settings
 from app.main import app
+from app.jobs.manager import JobManager
+from app.services.result_service import cleanup_stale_temp_outputs, save_active_workspace_paths, zip_result_paths
+from app.services.upload_service import safe_upload_name, save_upload
 
 client = TestClient(app)
 
@@ -157,7 +165,7 @@ def wait_for_job(job_id: str) -> dict:
         )
         assert resp.status_code == 200
         payload = resp.json()
-        if payload["status"] in {"done", "error"}:
+        if payload["status"] in {"done", "error", "cancelled"}:
             return payload
         time.sleep(0.05)
     raise AssertionError(f"Job {job_id} did not finish in time")
@@ -333,6 +341,25 @@ def test_preview_manifest_succeeds_with_token(tmp_path: Path):
     assert payload["preview_id"]
     assert len(payload["pages"]) == 2
     assert payload["pages"][0]["image"] == ""
+
+
+def test_preview_document_returns_registered_pdf_with_token(tmp_path: Path):
+    source = make_pdf(tmp_path / "reader-source.pdf", 2)
+    manifest = client.post(
+        "/organize/preview-manifest",
+        json={"input_paths": [str(source)]},
+        headers={"x-privatepdf-token": settings.auth_token},
+    )
+
+    resp = client.get(
+        "/organize/preview-document",
+        params={"preview_id": manifest.json()["preview_id"]},
+        headers={"x-privatepdf-token": settings.auth_token},
+    )
+
+    assert resp.status_code == 200
+    assert resp.headers["content-type"] == "application/pdf"
+    assert resp.content == source.read_bytes()
 
 
 def test_preview_page_succeeds_with_token(tmp_path: Path):
@@ -623,8 +650,11 @@ def test_redact_pdf_path_succeeds_with_token(tmp_path: Path):
 
     assert resp.status_code == 200
     output_path = Path(resp.json()["output_path"])
-    with pikepdf.open(output_path) as pdf:
+    with pikepdf.open(source) as original, pikepdf.open(output_path) as pdf:
         assert len(pdf.pages) == 2
+        assert bytes(pdf.pages[1].obj) == bytes(original.pages[1].obj)
+        redacted_images = pdf.pages[0].Resources.get("/XObject", {})
+        assert max(int(redacted_images[key].get("/Width", 0)) for key in redacted_images) >= 600
 
     with render_page_rgb(output_path, 1) as image:
         pixel = image.getpixel((140, 140))
@@ -969,6 +999,99 @@ def test_download_result_and_zip_for_generated_output(tmp_path: Path):
     assert zip_resp.content.startswith(b"PK")
 
 
+def test_chained_revision_uses_previous_output_without_nested_processed_dirs(tmp_path: Path):
+    source = make_text_pdf(tmp_path / "revision-source.pdf", ["Original searchable text"])
+    original_bytes = source.read_bytes()
+    first = client.post(
+        "/organize/watermark-text",
+        params={"text": "REVISION", "pages": "1", "position": "top-right", "angle": "0", "size": "24", "opacity": "0.5", "color": "#112233"},
+        json={"input_paths": [str(source)]},
+        headers={"x-privatepdf-token": settings.auth_token},
+    )
+    assert first.status_code == 200
+    first_path = Path(first.json()["output_path"])
+    second = client.post(
+        "/organize/rotate-pdf",
+        params={"degrees": "90", "pages": "1"},
+        json={"input_paths": [str(first_path)]},
+        headers={"x-privatepdf-token": settings.auth_token},
+    )
+    assert second.status_code == 200
+    second_path = Path(second.json()["output_path"])
+    assert first_path != second_path
+    assert first_path.parent == second_path.parent
+    assert second_path.parent.name == "processed"
+    assert source.read_bytes() == original_bytes
+    assert b"REVISION" in page_content_bytes(second_path)[0]
+    with pikepdf.open(second_path) as result:
+        assert int(result.pages[0].get("/Rotate", 0)) % 360 == 90
+
+
+def test_working_revision_preview_and_download_are_the_same_pdf():
+    root = settings.temp_dir / f"revision-preview-{time.time_ns()}"
+    root.mkdir(parents=True)
+    source = make_text_pdf(root / "source.pdf", ["Preview source"])
+    edit = client.post(
+        "/organize/watermark-text",
+        params={"text": "ACTUAL", "pages": "1", "position": "center", "angle": "0", "size": "20", "opacity": "0.8", "color": "#000000"},
+        json={"input_paths": [str(source)]},
+        headers={"x-privatepdf-token": settings.auth_token},
+    )
+    revision_path = Path(edit.json()["output_path"])
+    manifest = client.post(
+        "/organize/preview-manifest",
+        json={"input_paths": [str(revision_path)]},
+        headers={"x-privatepdf-token": settings.auth_token},
+    )
+    preview = client.get(
+        "/organize/preview-document",
+        params={"preview_id": manifest.json()["preview_id"]},
+        headers={"x-privatepdf-token": settings.auth_token},
+    )
+    download = client.get(
+        "/results/download",
+        params={"path": str(revision_path)},
+        headers={"x-privatepdf-token": settings.auth_token},
+    )
+    assert preview.content == revision_path.read_bytes()
+    assert download.content == preview.content
+
+
+def test_zip_outputs_are_unique_and_temp_cleanup_is_scoped():
+    root = settings.temp_dir / f"merge-job-test-{time.time_ns()}"
+    root.mkdir(parents=True)
+    (root / "uploaded-source.pdf").write_bytes(b"temporary source")
+    result = make_pdf(root / "result.pdf", 1)
+    first_zip = zip_result_paths([result])
+    second_zip = zip_result_paths([result])
+    assert first_zip != second_zip
+    cleanup = client.post(
+        "/results/cleanup",
+        json={"paths": [str(result)], "release_workspace": True},
+        headers={"x-privatepdf-token": settings.auth_token},
+    )
+    assert cleanup.status_code == 200
+    assert cleanup.json() == {"deleted": 1}
+    assert not result.exists()
+    assert not root.exists()
+
+
+def test_active_workspace_revision_is_protected_from_stale_cleanup():
+    root = settings.temp_dir / f"merge-job-active-{time.time_ns()}"
+    root.mkdir(parents=True)
+    revision = make_pdf(root / "revision.pdf", 1)
+    assert save_active_workspace_paths([str(revision)]) == 1
+    old_timestamp = time.time() - 7200
+    os.utime(root, (old_timestamp, old_timestamp))
+
+    assert cleanup_stale_temp_outputs(max_age_hours=1) == 0
+    assert revision.exists()
+
+    assert save_active_workspace_paths([]) == 0
+    assert cleanup_stale_temp_outputs(max_age_hours=1) >= 1
+    assert not root.exists()
+
+
 def test_recent_files_and_history_are_persisted(tmp_path: Path):
     recent_resp = client.post(
         "/library/recent",
@@ -986,7 +1109,113 @@ def test_recent_files_and_history_are_persisted(tmp_path: Path):
     assert isinstance(history_resp.json()["items"], list)
 
 
+def test_library_requires_the_session_token():
+    assert client.get("/library/recent").status_code == 401
+    assert client.get("/library/history").status_code == 401
+
+
+def test_cors_allows_only_known_local_origins():
+    allowed = client.options(
+        "/library/recent",
+        headers={
+            "Origin": "http://127.0.0.1:5173",
+            "Access-Control-Request-Method": "GET",
+        },
+    )
+    assert allowed.status_code == 200
+    assert allowed.headers["access-control-allow-origin"] == "http://127.0.0.1:5173"
+
+    denied = client.options(
+        "/library/recent",
+        headers={
+            "Origin": "https://untrusted.example",
+            "Access-Control-Request-Method": "GET",
+        },
+    )
+    assert denied.status_code == 400
+    assert "access-control-allow-origin" not in denied.headers
+
+
+def test_upload_names_are_sanitized_and_confined_to_the_job_directory(tmp_path: Path):
+    assert safe_upload_name("../../outside.pdf", "input.pdf") == "outside.pdf"
+    assert safe_upload_name(r"..\\outside.pdf", "input.pdf") == "outside.pdf"
+    assert safe_upload_name("", "input.pdf") == "input.pdf"
+
+    upload = UploadFile(filename="../../outside.pdf", file=BytesIO(b"pdf"))
+    target = asyncio.run(save_upload(upload, tmp_path / "job", "input.pdf"))
+    assert target.parent == tmp_path / "job"
+    assert target.name == "outside.pdf"
+    assert target.read_bytes() == b"pdf"
+
+
+def test_upload_limit_is_enforced_and_partial_file_is_removed(tmp_path: Path):
+    old_limit = settings.max_upload_mb
+    object.__setattr__(settings, "max_upload_mb", 0)
+    try:
+        upload = UploadFile(filename="large.pdf", file=BytesIO(b"more than zero bytes"))
+        with pytest.raises(Exception) as exc_info:
+            asyncio.run(save_upload(upload, tmp_path / "job", "input.pdf"))
+        assert getattr(exc_info.value, "status_code", None) == 413
+        assert not (tmp_path / "job" / "large.pdf").exists()
+    finally:
+        object.__setattr__(settings, "max_upload_mb", old_limit)
+
+
 def test_health_endpoint_no_auth_needed():
     resp = client.get("/health")
     assert resp.status_code == 200
     assert resp.json() == {"status": "ok"}
+
+
+def test_job_manager_bounds_finished_job_memory():
+    manager = JobManager(max_workers=1, max_retained_jobs=2)
+    first = manager.create_job("first")
+    manager.complete_job(first.id, {})
+    second = manager.create_job("second")
+    manager.complete_job(second.id, {})
+    third = manager.create_job("third")
+    assert manager.get_job(first.id) is None
+    assert manager.get_job(second.id) is not None
+    assert manager.get_job(third.id) is not None
+
+
+def test_job_manager_cancels_at_a_progress_checkpoint_and_discards_output(tmp_path: Path):
+    manager = JobManager(max_workers=1)
+    started = Event()
+    release = Event()
+    generated = tmp_path / "generated.pdf"
+    job = manager.create_job("slow")
+
+    def work(progress):
+        started.set()
+        assert release.wait(timeout=2)
+        generated.write_bytes(b"partial output")
+        return {"output_path": str(generated)}
+
+    future = manager.submit(job.id, work)
+    assert started.wait(timeout=2)
+    assert manager.cancel_job(job.id).status == "cancelling"
+    release.set()
+    future.result(timeout=2)
+
+    cancelled = manager.get_job(job.id)
+    assert cancelled is not None
+    assert cancelled.status == "cancelled"
+    assert not generated.exists()
+
+
+def test_job_manager_cancels_queued_work_immediately():
+    manager = JobManager(max_workers=1)
+    release = Event()
+    first = manager.create_job("blocking")
+    def wait_for_release(_progress):
+        assert release.wait(timeout=2)
+        return {}
+
+    manager.submit(first.id, wait_for_release)
+    second = manager.create_job("queued")
+    future = manager.submit(second.id, lambda _progress: {"output_path": "never-created.pdf"})
+
+    assert manager.cancel_job(second.id).status == "cancelled"
+    assert future.cancelled()
+    release.set()

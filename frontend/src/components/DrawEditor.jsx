@@ -42,6 +42,8 @@ export function DrawEditor({
   setDrawThickness,
 }) {
   const previewHostRef = useRef(null);
+  const draftStrokeRef = useRef(null);
+  const draftFrameRef = useRef(0);
   const [draftStroke, setDraftStroke] = useState(null);
 
   const selectedPage = selectedPages[selectedPages.length - 1];
@@ -64,12 +66,28 @@ export function DrawEditor({
     }
   }, [activeDrawPage, previewPage, setActiveDrawPage]);
 
+  useEffect(() => () => window.cancelAnimationFrame(draftFrameRef.current), []);
+
+  function showDraft(next) {
+    draftStrokeRef.current = next;
+    if (draftFrameRef.current) {
+      return;
+    }
+    draftFrameRef.current = window.requestAnimationFrame(() => {
+      draftFrameRef.current = 0;
+      setDraftStroke(draftStrokeRef.current);
+    });
+  }
+
   function finishStroke() {
-    if (!draftStroke || draftStroke.points.length < 2 || !previewPage) {
+    const completed = draftStrokeRef.current;
+    if (!completed || completed.points.length < 2 || !previewPage) {
+      showDraft(null);
       setDraftStroke(null);
       return;
     }
-    addDrawStroke(previewPage.page, draftStroke.points);
+    addDrawStroke(previewPage.page, completed.points);
+    showDraft(null);
     setDraftStroke(null);
   }
 
@@ -107,19 +125,19 @@ export function DrawEditor({
               const bounds = previewHostRef.current.getBoundingClientRect();
               const start = pointWithinPreview(event, bounds);
               setActiveDrawPage(previewPage.page);
-              setDraftStroke({ points: [start] });
+              showDraft({ points: [start] });
               previewHostRef.current.setPointerCapture?.(event.pointerId);
             }}
             onPointerMove={(event) => {
-              if (!draftStroke || !previewHostRef.current) {
+              if (!draftStrokeRef.current || !previewHostRef.current) {
                 return;
               }
               const bounds = previewHostRef.current.getBoundingClientRect();
               const point = pointWithinPreview(event, bounds);
-              setDraftStroke((current) => (current ? { points: [...current.points, point] } : current));
+              showDraft({ points: [...draftStrokeRef.current.points, point] });
             }}
             onPointerUp={finishStroke}
-            onPointerCancel={() => setDraftStroke(null)}
+            onPointerCancel={() => { showDraft(null); setDraftStroke(null); }}
           >
             <div className="crop-preview-size">
               {previewPage ? `Page ${previewPage.page} · ${Math.round(previewPage.width)} x ${Math.round(previewPage.height)} pt` : "Page preview"}

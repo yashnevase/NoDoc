@@ -4,7 +4,7 @@ import { BusyBar } from "./components/BusyBar";
 import { CropEditor } from "./components/CropEditor";
 import { DocumentPanel } from "./components/DocumentPanel";
 import { DropOverlay } from "./components/DropOverlay";
-import { FilePanel } from "./components/FilePanel";
+import { DocumentTabs } from "./components/DocumentTabs";
 import { HeaderRibbon } from "./components/HeaderRibbon";
 import { MetadataEditor } from "./components/MetadataEditor";
 import { SettingsDrawer } from "./components/SettingsDrawer";
@@ -18,7 +18,9 @@ import {
 import { useWorkspacePersistence } from "./hooks/useWorkspacePersistence";
 import {
   canUseDesktopBridge,
+  cancelJob,
   checkHealth,
+  cleanupResults,
   copyFileToPath,
   deletePagesPath,
   deletePagesUpload,
@@ -27,6 +29,7 @@ import {
   extractPagesPath,
   extractPagesUpload,
   getJobStatus,
+  getOcrLanguages,
   imagesToPdfPaths,
   imagesToPdfUpload,
   mergePathFiles,
@@ -84,15 +87,16 @@ import {
 } from "./api";
 import { useGlobalFileDrop } from "./hooks/useGlobalFileDrop";
 import { useDocumentViewModel } from "./hooks/useDocumentViewModel";
+import { useDocumentWorkspace } from "./hooks/useDocumentWorkspace";
 import { useMenuEvents } from "./hooks/useMenuEvents";
 import { useOpenedFiles } from "./hooks/useOpenedFiles";
 import { usePreviewManifest } from "./hooks/usePreviewManifest";
 import { usePreviewViewport } from "./hooks/usePreviewViewport";
-import { useReaderNavigation } from "./hooks/useReaderNavigation";
 import { useSignatureReport } from "./hooks/useSignatureReport";
 import { useWatermarkDial } from "./hooks/useWatermarkDial";
 import {
   hasExtension,
+  joinNativePath,
   outputPathsFromResult,
   pagesToRange,
   pathItems,
@@ -101,16 +105,49 @@ import {
   uploadItems,
   normalizeAngle,
 } from "./utils/fileHelpers";
+import {
+  canRedoRevision,
+  canUndoRevision,
+  commitRevisionState,
+  currentRevision,
+  redoRevisionState,
+  revisionLabel,
+  undoRevisionState,
+} from "./utils/revisionHistory";
+
+const materializedPdfTools = new Set([
+  "extract", "delete", "rotate", "reorder", "reverse", "duplicate", "compress",
+  "page_numbers", "repair", "watermark", "sign", "text", "draw",
+  "highlight", "crop", "redact", "searchable", "metadata",
+]);
+const documentWideTools = new Set(["compress", "repair", "password", "searchable", "metadata", "reverse"]);
+
+function operationId() {
+  return globalThis.crypto?.randomUUID?.() || `operation-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
 
 export default function App() {
-  const [fileItems, setFileItems] = useState([]);
+  const {
+    activeDocument,
+    activeDocumentId,
+    activeSession,
+    addDocuments,
+    clearDocuments,
+    closeDocument,
+    documents: fileItems,
+    markExported,
+    restoreWorkspace,
+    sessions: documentSessions,
+    setActiveDocumentId,
+    setActivePageIndex: setReaderPageIndex,
+    setSelectedPages,
+    updateActiveSession,
+  } = useDocumentWorkspace();
   const [isDragging, setIsDragging] = useState(false);
   const [dropOverlayActive, setDropOverlayActive] = useState(false);
   const [activeGroup, setActiveGroup] = useState("convert");
   const [activeTool, setActiveTool] = useState("render");
-  const [selectedPages, setSelectedPages] = useState([]);
   const [pagePreview, setPagePreview] = useState([]);
-  const [readerPageIndex, setReaderPageIndex] = useState(0);
   const [readerZoom, setReaderZoom] = useState(1);
   const [rotation, setRotation] = useState(90);
   const [rotateScope, setRotateScope] = useState("selected");
@@ -153,6 +190,7 @@ export default function App() {
   const [signatureReport, setSignatureReport] = useState(null);
   const [signatureBusy, setSignatureBusy] = useState(false);
   const [ocrLanguage, setOcrLanguage] = useState("eng");
+  const [ocrLanguages, setOcrLanguages] = useState([]);
   const [ocrTextPreview, setOcrTextPreview] = useState("");
   const [ocrPageCount, setOcrPageCount] = useState(0);
   const [searchQuery, setSearchQuery] = useState("");
@@ -185,24 +223,43 @@ export default function App() {
   const signatureAbortRef = useRef(null);
   const searchAbortRef = useRef(null);
   const actionAbortRef = useRef(null);
-  const ocrEngineHint = "Install Tesseract or set PRIVATEPDF_TESSERACT_PATH to enable OCR on this machine.";
+  const activeSubmissionRef = useRef("");
+  const pageSelectionAnchorRef = useRef(null);
+  const ocrEngineHint = ocrLanguages.length
+    ? `Local OCR ready: ${ocrLanguages.join(", ")}`
+    : "OCR uses local Tesseract. The installed languages are checked before processing.";
+
+  const selectedPages = activeSession.selectedPages;
+  const readerPageIndex = activeSession.activePageIndex;
 
   const activeTools = groups.find((group) => group.id === activeGroup)?.tools || [];
   const activeToolInfo = groups.flatMap((group) => group.tools).find((tool) => tool.id === activeTool);
-  const fileNames = fileItems.map((item) => item.name);
-  const uploadedFiles = fileItems.filter((item) => item.source === "upload").map((item) => item.file);
-  const pathInputs = fileItems.filter((item) => item.source === "path").map((item) => item.path);
+  const workingRevision = currentRevision(activeSession);
+  const workingPath = workingRevision?.paths?.[0] || "";
+  const workingDocument = activeDocument && workingPath
+    ? { ...activeDocument, source: "path", path: workingPath, file: undefined, revisionId: workingRevision.id }
+    : activeDocument;
+  const batchInputTool = ["merge", "images"].includes(activeTool);
+  const operationItems = batchInputTool ? fileItems : workingDocument ? [workingDocument] : [];
+  const uploadedFiles = operationItems.filter((item) => item.source === "upload").map((item) => item.file);
+  const pathInputs = operationItems.filter((item) => item.source === "path").map((item) => item.path);
   const hasUploads = uploadedFiles.length > 0;
   const hasPaths = pathInputs.length > 0;
   const mixedSources = hasUploads && hasPaths;
   const sourceMode = hasPaths ? "open-with" : "selected";
-  const pdfItems = fileItems.filter((item) => item.name.toLowerCase().endsWith(".pdf"));
-  const imageItems = fileItems.filter((item) => hasExtension(item.name, imageExtensions));
-  const allSelectedArePdfs = fileItems.length > 0 && pdfItems.length === fileItems.length;
-  const allSelectedAreImages = fileItems.length > 0 && imageItems.length === fileItems.length;
-  const exactlyOnePdfSelected = fileItems.length === 1 && pdfItems.length === 1;
-  const previewSourceKey = fileItems.map((item) => item.source === "path" ? `p:${item.path}` : `u:${item.name}:${item.file.size}:${item.file.lastModified}`).join("|");
-  const resultPaths = result?.paths || [];
+  const pdfItems = operationItems.filter((item) => item.name.toLowerCase().endsWith(".pdf"));
+  const batchPdfItems = fileItems.filter((item) => item.name.toLowerCase().endsWith(".pdf"));
+  const batchImageItems = fileItems.filter((item) => hasExtension(item.name, imageExtensions));
+  const allSelectedArePdfs = fileItems.length > 0 && batchPdfItems.length === fileItems.length;
+  const allSelectedAreImages = fileItems.length > 0 && batchImageItems.length === fileItems.length;
+  const exactlyOnePdfSelected = operationItems.length === 1 && pdfItems.length === 1;
+  const previewSourceKey = `${activeDocumentId}:${activeSession.revisionVersion || 0}:` + operationItems.map((item) => item.source === "path" ? `p:${item.path}` : `u:${item.name}:${item.file.size}:${item.file.lastModified}`).join("|");
+  const resultPaths = activeTool === "reader" && workingRevision
+    ? workingRevision.paths
+    : result?.paths || workingRevision?.paths || [];
+  const documentRevisionLabel = revisionLabel(activeSession);
+  const canUndoDocument = canUndoRevision(activeSession) || Boolean(activeSession.draftUndo?.length);
+  const canRedoDocument = canRedoRevision(activeSession) || Boolean(activeSession.draftRedo?.length);
   const {
     bottomSpacerHeight,
     currentReaderIndex,
@@ -240,8 +297,10 @@ export default function App() {
   const pageSelectionLocked = rotateAppliesToAll || watermarkAllPages || signAllPages || textAllPages || cropAllPages;
   const selectionLabel = pageToolActive && pagePreview.length
     ? pageSelectionLocked
-      ? `${pagePreview.length}/${pagePreview.length} selected`
-      : `${selectedPages.length}/${pagePreview.length} selected`
+      ? `All ${pagePreview.length} pages`
+      : selectedPages.length === 1
+        ? `Page ${selectedPages[0]}`
+        : `${selectedPages.length} pages selected`
     : "";
   const actionLabel = isBusy
     ? busyLabel
@@ -253,7 +312,10 @@ export default function App() {
   const { rememberRecentFiles, pushHistoryEntry } = useWorkspacePersistence({
     activeGroup,
     activeTool,
+    activeDocumentId,
     compressPreset,
+    documentSessions,
+    documents: fileItems,
     jobHistory,
     outputFolder,
     readerZoom,
@@ -287,6 +349,7 @@ export default function App() {
     watermarkScope,
     watermarkSize,
     themeMode,
+    restoreWorkspace,
   });
 
   useEffect(() => {
@@ -299,6 +362,59 @@ export default function App() {
     media.addEventListener("change", applyTheme);
     return () => media.removeEventListener("change", applyTheme);
   }, [themeMode]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const loadLanguages = async () => {
+      try {
+        const response = await getOcrLanguages();
+        if (!cancelled) {
+          setOcrLanguages(response.languages || []);
+        }
+      } catch {
+        if (!cancelled) {
+          setOcrLanguages([]);
+        }
+      }
+    };
+    void loadLanguages();
+    window.addEventListener("nodoc-ready", loadLanguages);
+    return () => {
+      cancelled = true;
+      window.removeEventListener("nodoc-ready", loadLanguages);
+    };
+  }, []);
+
+  useEffect(() => {
+    function handleHistoryShortcut(event) {
+      if (!(event.metaKey || event.ctrlKey) || (event.key.toLowerCase() !== "z" && event.key.toLowerCase() !== "y")) {
+        return;
+      }
+      const redo = event.key.toLowerCase() === "y" || event.shiftKey;
+      if (redo ? canRedoDocument : canUndoDocument) {
+        event.preventDefault();
+        redo ? redoDocumentChange() : undoDocumentChange();
+      }
+    }
+    window.addEventListener("keydown", handleHistoryShortcut);
+    return () => window.removeEventListener("keydown", handleHistoryShortcut);
+  }, [activeDocumentId, activeSession, canRedoDocument, canUndoDocument, isBusy]);
+
+  useEffect(() => {
+    const hasUnsavedWork = Object.values(documentSessions).some((session) => {
+      const revision = currentRevision(session);
+      return session.dirty || revision && session.exportedRevisionId !== revision.id;
+    });
+    if (!hasUnsavedWork) {
+      return undefined;
+    }
+    function warnBeforeUnload(event) {
+      event.preventDefault();
+      event.returnValue = "";
+    }
+    window.addEventListener("beforeunload", warnBeforeUnload);
+    return () => window.removeEventListener("beforeunload", warnBeforeUnload);
+  }, [documentSessions]);
   usePreviewViewport({
     activeTool,
     exactlyOnePdfSelected,
@@ -308,10 +424,10 @@ export default function App() {
     setPreviewViewport,
   });
   useOpenedFiles({
+    addDocuments,
     rememberRecentFiles,
     setActiveGroup,
     setActiveTool,
-    setFileItems,
     setResult,
     setStatus,
   });
@@ -329,11 +445,6 @@ export default function App() {
     setSelectedPages,
     setStatus,
     uploadedFiles,
-  });
-  useReaderNavigation({
-    pagePreviewLength: pagePreview.length,
-    readerActive,
-    setReaderPageIndex,
   });
   useSignatureReport({
     activeTool,
@@ -406,6 +517,97 @@ export default function App() {
     setOcrPageCount(0);
   }, [previewSourceKey, exactlyOnePdfSelected]);
 
+  function captureEditorState() {
+    return {
+      activeDrawPage,
+      activeHighlightPage,
+      activeRedactionPage,
+      compressPreset,
+      crop,
+      cropScope,
+      drawColor,
+      drawOpacity,
+      drawStrokes,
+      drawThickness,
+      highlightColor,
+      highlightOpacity,
+      highlightRegions,
+      metadata,
+      metadataForm,
+      ocrLanguage,
+      password,
+      pagePreview,
+      redactColor,
+      redactRegions,
+      rotateScope,
+      rotation,
+      signatureReport,
+      watermarkAngle,
+      watermarkColor,
+      watermarkImageFile,
+      watermarkMode,
+      watermarkOpacity,
+      watermarkPosition,
+      watermarkPreset,
+      watermarkScope,
+      watermarkSize,
+      watermarkText,
+    };
+  }
+
+  function restoreEditorState(state = {}) {
+    setRotation(state.rotation ?? 90);
+    setRotateScope(state.rotateScope ?? "selected");
+    setCompressPreset(state.compressPreset ?? "balanced");
+    setCropScope(state.cropScope ?? "selected");
+    setCrop(state.crop ?? { left: 0, top: 0, right: 0, bottom: 0 });
+    setDrawStrokes(state.drawStrokes ?? {});
+    setDrawColor(state.drawColor ?? "#b02730");
+    setDrawOpacity(state.drawOpacity ?? 0.92);
+    setDrawThickness(state.drawThickness ?? 3);
+    setActiveDrawPage(state.activeDrawPage ?? null);
+    setHighlightRegions(state.highlightRegions ?? {});
+    setHighlightColor(state.highlightColor ?? "#f2cd53");
+    setHighlightOpacity(state.highlightOpacity ?? 0.34);
+    setActiveHighlightPage(state.activeHighlightPage ?? null);
+    setRedactRegions(state.redactRegions ?? {});
+    setRedactColor(state.redactColor ?? "#121212");
+    setActiveRedactionPage(state.activeRedactionPage ?? null);
+    setMetadata(state.metadata ?? null);
+    setMetadataForm(state.metadataForm ?? { title: "", author: "", subject: "", keywords: "", creator: "", producer: "" });
+    setPassword(state.password ?? "");
+    if (Array.isArray(state.pagePreview)) {
+      setPagePreview(state.pagePreview);
+    }
+    setWatermarkText(state.watermarkText ?? "NoDoc");
+    setWatermarkMode(state.watermarkMode ?? "text");
+    setWatermarkPreset(state.watermarkPreset ?? "verified");
+    setWatermarkScope(state.watermarkScope ?? "selected");
+    setWatermarkPosition(state.watermarkPosition ?? "center");
+    setWatermarkAngle(state.watermarkAngle ?? -45);
+    setWatermarkSize(state.watermarkSize ?? 48);
+    setWatermarkOpacity(state.watermarkOpacity ?? 0.22);
+    setWatermarkColor(state.watermarkColor ?? "#b02730");
+    setWatermarkImageFile(state.watermarkImageFile ?? null);
+    setSignatureReport(state.signatureReport ?? null);
+    setOcrLanguage(state.ocrLanguage ?? "eng");
+  }
+
+  function activateDocument(documentId) {
+    if (!documentId || documentId === activeDocumentId || isBusy) {
+      return;
+    }
+    updateActiveSession({ activeGroup, activeTool, editState: captureEditorState() });
+    const nextSession = documentSessions[documentId];
+    setActiveDocumentId(documentId);
+    setActiveGroup(nextSession?.activeGroup || "tools");
+    setActiveTool(nextSession?.activeTool || "reader");
+    restoreEditorState(nextSession?.editState);
+    const paths = nextSession?.workingPaths || [];
+    setResult(paths.length ? { tool: nextSession?.activeTool || "reader", paths } : null);
+    setStatus(`Active document: ${fileItems.find((item) => item.id === documentId)?.name || "document"}`);
+  }
+
   function loadPathItems(paths, statusMessage) {
     const cleanPaths = (paths || []).filter(Boolean);
     if (!cleanPaths.length) {
@@ -413,8 +615,8 @@ export default function App() {
       return;
     }
     const nextItems = pathItems(cleanPaths);
-    setFileItems(nextItems);
-    if (nextItems.length === 1 && nextItems[0].name.toLowerCase().endsWith(".pdf")) {
+    addDocuments(nextItems);
+    if (nextItems.some((item) => item.name.toLowerCase().endsWith(".pdf"))) {
       setActiveGroup("tools");
       setActiveTool("reader");
     }
@@ -443,8 +645,8 @@ export default function App() {
 
   function updateFiles(files) {
     const nextItems = uploadItems(files);
-    setFileItems(nextItems);
-    if (nextItems.length === 1 && nextItems[0].name.toLowerCase().endsWith(".pdf")) {
+    addDocuments(nextItems);
+    if (nextItems.some((item) => item.name.toLowerCase().endsWith(".pdf"))) {
       setActiveGroup("tools");
       setActiveTool("reader");
     }
@@ -478,8 +680,8 @@ export default function App() {
           return;
         }
         const nextItems = pathItems(paths);
-        setFileItems(nextItems);
-        if (nextItems.length === 1 && nextItems[0].name.toLowerCase().endsWith(".pdf")) {
+        addDocuments(nextItems);
+        if (nextItems.some((item) => item.name.toLowerCase().endsWith(".pdf"))) {
           setActiveGroup("tools");
           setActiveTool("reader");
         }
@@ -511,18 +713,52 @@ export default function App() {
     }
   }
 
-  function removeFileAt(indexToRemove) {
-    setFileItems((current) => current.filter((_, index) => index !== indexToRemove));
+  function removeDocument(documentId) {
+    const session = documentSessions[documentId];
+    const current = currentRevision(session);
+    const hasUnexportedRevision = current && session.exportedRevisionId !== current.id;
+    if ((session?.dirty || hasUnexportedRevision) && !window.confirm(session?.dirty
+      ? "This document has unapplied changes. Close it anyway?"
+      : "This working revision has not been exported. Close it anyway?")) {
+      return;
+    }
+    if (documentId === activeDocumentId) {
+      previewAbortRef.current?.abort();
+      const index = fileItems.findIndex((item) => item.id === documentId);
+      const remaining = fileItems.filter((item) => item.id !== documentId);
+      const replacement = remaining[Math.min(index, Math.max(0, remaining.length - 1))];
+      if (replacement) {
+        activateDocument(replacement.id);
+      }
+    }
+    const temporaryPaths = [...new Set((session?.revisions || []).flatMap((revision) => revision.paths || []))];
+    if (temporaryPaths.length) {
+      void cleanupResults(temporaryPaths, { releaseWorkspace: true }).catch(() => {});
+    }
+    closeDocument(documentId);
     setResult(null);
-    setStatus("File removed");
+    setStatus("Document closed");
   }
 
   function clearFiles() {
+    const hasUnsavedWork = Object.values(documentSessions).some((session) => {
+      const current = currentRevision(session);
+      return session.dirty || current && session.exportedRevisionId !== current.id;
+    });
+    if (hasUnsavedWork && !window.confirm("Some documents have unapplied or unexported changes. Clear the workspace anyway?")) {
+      return;
+    }
     previewAbortRef.current?.abort();
     signatureAbortRef.current?.abort();
     actionAbortRef.current?.abort();
     searchAbortRef.current?.abort();
-    setFileItems([]);
+    const temporaryPaths = [...new Set(Object.values(documentSessions).flatMap((session) =>
+      (session.revisions || []).flatMap((revision) => revision.paths || [])
+    ))];
+    if (temporaryPaths.length) {
+      void cleanupResults(temporaryPaths, { releaseWorkspace: true }).catch(() => {});
+    }
+    clearDocuments();
     setResult(null);
     setSelectedPages([]);
     setPagePreview([]);
@@ -578,11 +814,14 @@ export default function App() {
     const group = groups.find((item) => item.id === groupId);
     setActiveGroup(groupId);
     const firstReady = group?.tools.find((tool) => tool.status === "ready");
-    setActiveTool(firstReady?.id || group?.tools[0]?.id || "render");
+    const toolId = firstReady?.id || group?.tools[0]?.id || "render";
+    setActiveTool(toolId);
+    updateActiveSession({ activeGroup: groupId, activeTool: toolId, editState: captureEditorState() });
   }
 
   function chooseTool(tool) {
     setActiveTool(tool.id);
+    updateActiveSession({ activeGroup, activeTool: tool.id, editState: captureEditorState() });
     if (tool.id !== "rotate") {
       setRotateScope("selected");
     }
@@ -642,6 +881,97 @@ export default function App() {
     );
   }
 
+  function selectReaderPage(pageNumber, event) {
+    const additive = event.metaKey || event.ctrlKey;
+    if (event.shiftKey && pageSelectionAnchorRef.current) {
+      const start = Math.min(pageSelectionAnchorRef.current, pageNumber);
+      const end = Math.max(pageSelectionAnchorRef.current, pageNumber);
+      const range = Array.from({ length: end - start + 1 }, (_, index) => start + index);
+      setSelectedPages((current) => additive ? [...new Set([...current, ...range])].sort((a, b) => a - b) : range);
+      return;
+    }
+    pageSelectionAnchorRef.current = pageNumber;
+    if (additive) {
+      togglePage(pageNumber);
+      return;
+    }
+    setSelectedPages([pageNumber]);
+  }
+
+  function beginDocumentEdit(key = "editor") {
+    if (!activeDocument) {
+      return;
+    }
+    const snapshot = captureEditorState();
+    const now = Date.now();
+    updateActiveSession((session) => {
+      const history = session.draftUndo || [];
+      const last = history[history.length - 1];
+      const coalesced = last?.key === key && now - last.at < 500;
+      return {
+        dirty: true,
+        draftUndo: coalesced ? history : [...history.slice(-49), { key, at: now, snapshot }],
+        draftRedo: [],
+      };
+    });
+  }
+
+  function showRevision(nextSession, message) {
+    const revision = currentRevision(nextSession);
+    setResult(revision?.paths?.length ? { tool: revision.operationType, paths: revision.paths } : null);
+    setActiveGroup("tools");
+    setActiveTool("reader");
+    restoreEditorState({});
+    setPagePreview([]);
+    setSelectedPages([]);
+    updateActiveSession({ ...nextSession, activeGroup: "tools", activeTool: "reader", editState: {}, dirty: false });
+    setStatus(message);
+  }
+
+  function undoDocumentChange() {
+    if (isBusy || !activeDocument) {
+      return;
+    }
+    const draftUndo = activeSession.draftUndo || [];
+    if (draftUndo.length) {
+      const previous = draftUndo[draftUndo.length - 1];
+      const current = captureEditorState();
+      restoreEditorState(previous.snapshot);
+      updateActiveSession({
+        dirty: draftUndo.length > 1,
+        draftUndo: draftUndo.slice(0, -1),
+        draftRedo: [...(activeSession.draftRedo || []), { key: previous.key, at: Date.now(), snapshot: current }],
+      });
+      setStatus("Undid unapplied edit");
+      return;
+    }
+    if (activeSession.revisionIndex >= 0) {
+      showRevision(undoRevisionState(activeSession), activeSession.revisionIndex === 0 ? "Returned to original" : "Previous revision restored");
+    }
+  }
+
+  function redoDocumentChange() {
+    if (isBusy || !activeDocument) {
+      return;
+    }
+    const draftRedo = activeSession.draftRedo || [];
+    if (draftRedo.length) {
+      const next = draftRedo[draftRedo.length - 1];
+      const current = captureEditorState();
+      restoreEditorState(next.snapshot);
+      updateActiveSession({
+        dirty: true,
+        draftUndo: [...(activeSession.draftUndo || []), { key: next.key, at: Date.now(), snapshot: current }],
+        draftRedo: draftRedo.slice(0, -1),
+      });
+      setStatus("Redid unapplied edit");
+      return;
+    }
+    if (canRedoRevision(activeSession)) {
+      showRevision(redoRevisionState(activeSession), "Next revision restored");
+    }
+  }
+
   function selectAllPages() {
     setSelectedPages(pagePreview.map((page) => page.page));
   }
@@ -651,6 +981,7 @@ export default function App() {
   }
 
   function addRedactionRect(pageNumber, rect) {
+    beginDocumentEdit("redaction");
     setRedactRegions((current) => ({
       ...current,
       [pageNumber]: [...(current[pageNumber] || []), rect],
@@ -662,6 +993,7 @@ export default function App() {
   }
 
   function addHighlightRect(pageNumber, rect) {
+    beginDocumentEdit("highlight");
     setHighlightRegions((current) => ({
       ...current,
       [pageNumber]: [...(current[pageNumber] || []), rect],
@@ -673,6 +1005,7 @@ export default function App() {
   }
 
   function addDrawStroke(pageNumber, points) {
+    beginDocumentEdit("drawing");
     setDrawStrokes((current) => ({
       ...current,
       [pageNumber]: [...(current[pageNumber] || []), { points }],
@@ -684,6 +1017,7 @@ export default function App() {
   }
 
   function removeRedactionRect(pageNumber, indexToRemove) {
+    beginDocumentEdit("redaction");
     setRedactRegions((current) => {
       const next = { ...current };
       const pageRects = [...(next[pageNumber] || [])];
@@ -699,7 +1033,18 @@ export default function App() {
     setStatus(`Redaction box removed from page ${pageNumber}`);
   }
 
+  function updateRedactionRect(pageNumber, indexToUpdate, rect) {
+    beginDocumentEdit("redaction");
+    setRedactRegions((current) => ({
+      ...current,
+      [pageNumber]: (current[pageNumber] || []).map((item, index) => index === indexToUpdate ? rect : item),
+    }));
+    setResult(null);
+    setStatus(`Redaction box updated on page ${pageNumber}`);
+  }
+
   function clearRedactionsForPage(pageNumber) {
+    beginDocumentEdit("redaction");
     setRedactRegions((current) => {
       if (!current[pageNumber]?.length) {
         return current;
@@ -713,12 +1058,14 @@ export default function App() {
   }
 
   function clearAllRedactions() {
+    beginDocumentEdit("redaction");
     setRedactRegions({});
     setResult(null);
     setStatus("All redaction boxes cleared");
   }
 
   function removeHighlightRect(pageNumber, indexToRemove) {
+    beginDocumentEdit("highlight");
     setHighlightRegions((current) => {
       const next = { ...current };
       const pageRects = [...(next[pageNumber] || [])];
@@ -734,7 +1081,18 @@ export default function App() {
     setStatus(`Highlight removed from page ${pageNumber}`);
   }
 
+  function updateHighlightRect(pageNumber, indexToUpdate, rect) {
+    beginDocumentEdit("highlight");
+    setHighlightRegions((current) => ({
+      ...current,
+      [pageNumber]: (current[pageNumber] || []).map((item, index) => index === indexToUpdate ? rect : item),
+    }));
+    setResult(null);
+    setStatus(`Highlight updated on page ${pageNumber}`);
+  }
+
   function clearHighlightsForPage(pageNumber) {
+    beginDocumentEdit("highlight");
     setHighlightRegions((current) => {
       if (!current[pageNumber]?.length) {
         return current;
@@ -748,12 +1106,14 @@ export default function App() {
   }
 
   function clearAllHighlights() {
+    beginDocumentEdit("highlight");
     setHighlightRegions({});
     setResult(null);
     setStatus("All highlight boxes cleared");
   }
 
   function removeLastDrawStroke(pageNumber) {
+    beginDocumentEdit("drawing");
     setDrawStrokes((current) => {
       const next = { ...current };
       const pageStrokes = [...(next[pageNumber] || [])];
@@ -770,6 +1130,7 @@ export default function App() {
   }
 
   function clearDrawStrokesForPage(pageNumber) {
+    beginDocumentEdit("drawing");
     setDrawStrokes((current) => {
       if (!current[pageNumber]?.length) {
         return current;
@@ -783,6 +1144,7 @@ export default function App() {
   }
 
   function clearAllDrawStrokes() {
+    beginDocumentEdit("drawing");
     setDrawStrokes({});
     setResult(null);
     setStatus("All drawing strokes cleared");
@@ -826,6 +1188,7 @@ export default function App() {
     if (fromPage === toPage) {
       return;
     }
+    beginDocumentEdit("page-order");
     setPagePreview((current) => {
       const fromIndex = current.findIndex((page) => page.page === fromPage);
       const toIndex = current.findIndex((page) => page.page === toPage);
@@ -843,6 +1206,7 @@ export default function App() {
   }
 
   function resetPageOrder() {
+    beginDocumentEdit("page-order");
     setPagePreview((current) => [...current].sort((a, b) => a.page - b.page));
     setSelectedPages([]);
     setReorderDragPage(null);
@@ -867,6 +1231,7 @@ export default function App() {
       return;
     }
     event.preventDefault();
+    beginDocumentEdit("watermark-angle");
     watermarkDialDragRef.current = true;
     setWatermarkAngleFromPoint(event.clientX, event.clientY);
   }
@@ -882,6 +1247,7 @@ export default function App() {
     }
     setWatermarkImageFile(file);
     setWatermarkMode("image");
+    beginDocumentEdit("watermark-image");
   }
 
   async function loadMetadata() {
@@ -912,8 +1278,17 @@ export default function App() {
       const response = hasPaths
         ? await metadataPath(pathInputs, { remove_all: true }, requestOptions)
         : await metadataUpload(uploadedFiles, { remove_all: true }, requestOptions);
-      setResult({ tool: activeTool, paths: outputPathsFromResult(response) });
-      setStatus("Metadata removed");
+      const paths = outputPathsFromResult(response);
+      setResult({ tool: activeTool, paths });
+      materializeWorkingRevision("metadata", paths, {
+        id: operationId(),
+        documentId: activeDocumentId,
+        sourceRevisionId: workingRevision?.id || "original",
+        operationType: "metadata",
+        targetPageScope: "entire-document",
+        createdAt: new Date().toISOString(),
+      });
+      setStatus("Metadata removed in a new working revision");
     } catch (err) {
       setStatus(`Metadata error: ${err.message}`);
     }
@@ -949,7 +1324,6 @@ export default function App() {
           : "No matches"
       );
       if (matches.length > 0) {
-        setReaderPageIndex(Math.max(0, matches[0].page - 1));
         setStatus(`Found ${response.total_matches} match${response.total_matches === 1 ? "" : "es"}`);
       } else {
         setStatus("No matching text found.");
@@ -1035,7 +1409,23 @@ export default function App() {
     return "";
   }
 
-  function cancelCurrentWork() {
+  async function cancelCurrentWork() {
+    const jobId = activeSession.pendingJobId;
+    if (jobId) {
+      setStatus("Cancelling local processing...");
+      try {
+        const job = await cancelJob(jobId);
+        if (job.status === "cancelled") {
+          setStatus("Processing cancelled");
+        } else {
+          setStatus("Cancelling after the current processing step...");
+        }
+      } catch (err) {
+        setStatus(`Unable to cancel the local job: ${err.message}`);
+        return;
+      }
+      return;
+    }
     previewAbortRef.current?.abort();
     actionAbortRef.current?.abort();
     setBusyLabel("");
@@ -1043,7 +1433,9 @@ export default function App() {
     setPreviewBusy(false);
     setPageDragMode(null);
     setReorderDragPage(null);
-    setStatus("Current task cancelled");
+    if (!jobId) {
+      setStatus(isBusy ? "Stopped waiting; local processing may still finish" : "Current task cancelled");
+    }
   }
 
   async function withBusy(label, task) {
@@ -1080,6 +1472,11 @@ export default function App() {
       if (job.status === "error") {
         throw new Error(job.error || "Background job failed");
       }
+      if (job.status === "cancelled") {
+        const error = new Error("Processing cancelled");
+        error.name = "JobCancelled";
+        throw error;
+      }
 
       await sleep(450, signal);
     }
@@ -1115,12 +1512,99 @@ export default function App() {
     }
   }
 
+  function materializeWorkingRevision(tool, paths, operation) {
+    const isWorkingPdf = materializedPdfTools.has(tool)
+      && paths.length === 1
+      && paths[0].toLowerCase().endsWith(".pdf");
+    if (!isWorkingPdf) {
+      return false;
+    }
+    const discardedPaths = (activeSession.revisions || [])
+      .slice((activeSession.revisionIndex ?? -1) + 1)
+      .flatMap((revision) => revision.paths || []);
+    if (discardedPaths.length) {
+      void cleanupResults(discardedPaths).catch(() => {});
+    }
+    const revision = { ...operation, id: operationId(), operationType: tool, paths, status: "ready" };
+    const cleanEditorState = {
+      ...captureEditorState(),
+      pagePreview: [],
+      drawStrokes: {},
+      highlightRegions: {},
+      redactRegions: {},
+      activeDrawPage: null,
+      activeHighlightPage: null,
+      activeRedactionPage: null,
+    };
+    updateActiveSession((session) => ({
+      ...commitRevisionState(session, revision),
+      activeGroup: "tools",
+      activeTool: "reader",
+      editState: cleanEditorState,
+      dirty: false,
+      processing: false,
+      pendingJobId: "",
+      draftUndo: [],
+      draftRedo: [],
+      lastOperation: revision,
+    }));
+    setDrawStrokes({});
+    setHighlightRegions({});
+    setRedactRegions({});
+    setActiveDrawPage(null);
+    setActiveHighlightPage(null);
+    setActiveRedactionPage(null);
+    setPagePreview([]);
+    setSelectedPages([]);
+    setActiveGroup("tools");
+    setActiveTool("reader");
+    setStatus(`Working revision ${activeSession.revisionIndex + 2} ready for preview`);
+    return true;
+  }
+
   async function runActiveTool() {
     const readinessError = assertReady();
     if (readinessError) {
       setStatus(readinessError);
       return;
     }
+
+    const submissionKey = `${activeDocumentId}:${activeSession.revisionVersion || 0}:${activeTool}`;
+    if (activeSession.pendingJobId) {
+      setStatus("Wait for the active local job to finish or cancel it first.");
+      return;
+    }
+    if (activeSubmissionRef.current === submissionKey) {
+      setStatus("That operation is already running.");
+      return;
+    }
+    activeSubmissionRef.current = submissionKey;
+    const operation = {
+      id: operationId(),
+      documentId: activeDocumentId,
+      sourceRevisionId: workingRevision?.id || "original",
+      operationType: activeTool,
+      targetPageScope: pageSelectionLocked || documentWideTools.has(activeTool) || activeTool === "page_numbers" && !selectedPages.length
+        ? "all"
+        : pagesToRange(selectedPages) || `page-${readerPageIndex + 1}`,
+      settings: {
+        angle: watermarkAngle,
+        color: ["draw", "highlight", "redact"].includes(activeTool)
+          ? { draw: drawColor, highlight: highlightColor, redact: redactColor }[activeTool]
+          : watermarkColor,
+        compressionPreset: compressPreset,
+        crop: activeTool === "crop" ? crop : undefined,
+        imageName: watermarkImageFile?.name,
+        opacity: { draw: drawOpacity, highlight: highlightOpacity }[activeTool] ?? watermarkOpacity,
+        pageOrder: activeTool === "reorder" ? pagePreview.map((page) => page.page) : undefined,
+        rotation: activeTool === "rotate" ? rotation : undefined,
+        size: watermarkSize,
+        text: ["text", "watermark"].includes(activeTool) ? watermarkText : undefined,
+        thickness: activeTool === "draw" ? drawThickness : undefined,
+      },
+      createdAt: new Date().toISOString(),
+    };
+    updateActiveSession({ processing: true, pendingJobId: "", lastOperation: { ...operation, status: "processing" } });
 
     await withBusy("Processing...", async (signal) => {
       setResult(null);
@@ -1306,6 +1790,7 @@ export default function App() {
         }
 
         if (response?.job_id) {
+          updateActiveSession({ pendingJobId: response.job_id });
           response = await waitForJob(response.job_id, signal);
         }
 
@@ -1316,22 +1801,36 @@ export default function App() {
 
         const paths = outputPathsFromResult(response);
         setResult({ tool: activeTool, paths });
-        pushHistoryEntry(activeTool, paths);
-        setStatus(paths.length === 1 ? "Created 1 file" : `Created ${paths.length} files`);
-        if (activeTool === "sign" || activeTool === "draw" || activeTool === "highlight" || activeTool === "redact") {
-          setPreviewTick((value) => value + 1);
+        if (!materializeWorkingRevision(activeTool, paths, operation)) {
+          updateActiveSession({ processing: false, pendingJobId: "", lastOperation: { ...operation, paths, status: "ready" } });
+          setStatus(paths.length === 1 ? "Created 1 file" : `Created ${paths.length} files`);
         }
+        pushHistoryEntry(activeTool, paths);
       } catch (err) {
-        if (err.name === "AbortError") {
+        if (err.name === "JobCancelled") {
+          updateActiveSession({ processing: false, pendingJobId: "", lastOperation: { ...operation, status: "cancelled" } });
           setStatus("Processing cancelled");
           return;
         }
+        if (err.name === "AbortError") {
+          updateActiveSession({ processing: false, pendingJobId: "", lastOperation: { ...operation, status: "waiting-stopped" } });
+          setStatus("Stopped waiting; local processing may still finish");
+          return;
+        }
+        updateActiveSession({ processing: false, pendingJobId: "", lastOperation: { ...operation, status: "error", error: err.message } });
         setStatus(`Error: ${err.message}`);
       }
     });
+    activeSubmissionRef.current = "";
+    updateActiveSession({ processing: false });
   }
 
   async function handleDownloadOne(path) {
+    const exportsWorkingRevision = Boolean(workingRevision?.paths.includes(path));
+    if (activeTool === "reader" && workingRevision && !exportsWorkingRevision) {
+      setStatus("This result is not the revision currently shown in preview.");
+      return;
+    }
     await withBusy("Preparing download...", async () => {
       try {
         if (canUseDesktopBridge()) {
@@ -1341,11 +1840,17 @@ export default function App() {
             return;
           }
           await copyFileToPath(path, targetPath);
+          if (exportsWorkingRevision) {
+            markExported(workingRevision.id);
+          }
           setStatus("File saved");
           return;
         }
 
         await downloadResult(path);
+        if (exportsWorkingRevision) {
+          markExported(workingRevision.id);
+        }
         setStatus("Download started");
       } catch (err) {
         setStatus(`Download error: ${err.message}`);
@@ -1381,7 +1886,10 @@ export default function App() {
     await withBusy("Exporting files...", async () => {
       try {
         for (const path of paths) {
-          await copyFileToPath(path, `${outputFolder}\\${pathName(path)}`);
+          await copyFileToPath(path, joinNativePath(outputFolder, pathName(path)));
+        }
+        if (workingRevision && paths.length === workingRevision.paths.length && paths.every((path) => workingRevision.paths.includes(path))) {
+          markExported(workingRevision.id);
         }
         setStatus(paths.length === 1 ? "Exported 1 file to output folder" : `Exported ${paths.length} files to output folder`);
       } catch (err) {
@@ -1431,10 +1939,13 @@ export default function App() {
 
       <HeaderRibbon
         actionLabel={actionLabel}
+        activeDocumentName={activeDocument?.name}
         activeGroup={activeGroup}
         activeTool={activeTool}
         activeTools={activeTools}
         cancelCurrentWork={cancelCurrentWork}
+        canRedoDocument={canRedoDocument}
+        canUndoDocument={canUndoDocument}
         chooseGroup={chooseGroup}
         chooseTool={chooseTool}
         compressPreset={compressPreset}
@@ -1444,40 +1955,41 @@ export default function App() {
         handleHealthCheck={handleHealthCheck}
         isBusy={isBusy}
         openFiles={() => void openFiles()}
+        redoDocumentChange={redoDocumentChange}
         password={password}
         resultPaths={resultPaths}
         rotateScope={rotateScope}
         rotation={rotation}
         runActiveTool={runActiveTool}
         selectionLabel={selectionLabel}
-        setCompressPreset={setCompressPreset}
-        setPassword={setPassword}
-        setRotateScope={setRotateScope}
-        setRotation={setRotation}
+        setCompressPreset={(value) => { beginDocumentEdit("compression"); setCompressPreset(value); }}
+        setPassword={(value) => { beginDocumentEdit("password"); setPassword(value); }}
+        setRotateScope={(value) => { beginDocumentEdit("rotation"); setRotateScope(value); }}
+        setRotation={(value) => { beginDocumentEdit("rotation"); setRotation(value); }}
         setShowSettings={setShowSettings}
         showCancelAction={showCancelAction}
         sourceMode={sourceMode}
         status={status}
         themeMode={themeMode}
+        undoDocumentChange={undoDocumentChange}
         setThemeMode={setThemeMode}
       />
 
-      <section className="workspace">
-        <FilePanel
-          clearFiles={clearFiles}
+      <DocumentTabs
+          activeDocumentId={activeDocumentId}
+          documents={fileItems}
           fileInputRef={fileInputRef}
-          fileItems={fileItems}
-          fileNames={fileNames}
-          handleDrop={handleDrop}
           isBusy={isBusy}
-          isDragging={isDragging}
-          onBrowse={() => void openFiles()}
-          onDragState={setIsDragging}
-          removeFileAt={removeFileAt}
+          onActivate={activateDocument}
+          onAdd={() => void openFiles()}
+          onClose={removeDocument}
+          sessions={documentSessions}
           updateFiles={updateFiles}
-        />
+      />
 
+      <section className="workspace">
         <DocumentPanel
+          activeDocument={activeDocument}
           activeTool={activeTool}
           activeToolInfo={activeToolInfo}
           beginPageDragSelection={beginPageDragSelection}
@@ -1498,9 +2010,11 @@ export default function App() {
           internalDragRef={internalDragRef}
           isBusy={isBusy}
           movePreviewPage={movePreviewPage}
+          onOpenFiles={() => void openFiles()}
           pagePreview={pagePreview}
           pageSelectionLocked={pageSelectionLocked}
           pageToolActive={pageToolActive}
+          selectReaderPage={selectReaderPage}
           previewBusy={previewBusy}
           previewPage={previewPage}
           previewPageLabel={previewPageLabel}
@@ -1511,6 +2025,7 @@ export default function App() {
           readerActive={readerActive}
           readerPageLabel={readerPageLabel}
           readerZoom={readerZoom}
+          revisionStateLabel={documentRevisionLabel}
           searchBusy={searchBusy}
           searchQuery={searchQuery}
           searchResults={searchResults}
@@ -1530,10 +2045,12 @@ export default function App() {
           highlightOpacity={highlightOpacity}
           highlightRegions={highlightRegions}
           loadMetadata={loadMetadata}
+          beginDocumentEdit={beginDocumentEdit}
           metadata={metadata}
           metadataForm={metadataForm}
           ocrEngineHint={ocrEngineHint}
           ocrLanguage={ocrLanguage}
+          ocrLanguages={ocrLanguages}
           ocrPageCount={ocrPageCount}
           ocrTextPreview={ocrTextPreview}
           removeAllMetadata={removeAllMetadata}
@@ -1547,11 +2064,13 @@ export default function App() {
           addRedactionRect={addRedactionRect}
           removeLastDrawStroke={removeLastDrawStroke}
           removeHighlightRect={removeHighlightRect}
+          updateHighlightRect={updateHighlightRect}
           clearDrawStrokesForPage={clearDrawStrokesForPage}
           clearAllDrawStrokes={clearAllDrawStrokes}
           clearHighlightsForPage={clearHighlightsForPage}
           clearAllHighlights={clearAllHighlights}
           removeRedactionRect={removeRedactionRect}
+          updateRedactionRect={updateRedactionRect}
           clearRedactionsForPage={clearRedactionsForPage}
           clearAllRedactions={clearAllRedactions}
           setDropOverlayActive={setDropOverlayActive}

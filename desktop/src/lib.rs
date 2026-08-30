@@ -4,6 +4,7 @@ use std::{
     path::PathBuf,
     process::{Child, Command, Stdio},
     sync::Mutex,
+    thread,
 };
 
 use tauri::{
@@ -45,19 +46,44 @@ fn opened_file_args() -> Vec<String> {
 
 fn sidecar_candidates(app: &tauri::App) -> Vec<PathBuf> {
     let mut candidates = Vec::new();
+    let name = if cfg!(target_os = "windows") {
+        "nodoc-sidecar.exe"
+    } else {
+        "nodoc-sidecar"
+    };
 
     if let Ok(path) = app
         .path()
-        .resolve("sidecar/nodoc-sidecar.exe", BaseDirectory::Resource)
+        .resolve(format!("sidecar/{name}"), BaseDirectory::Resource)
     {
         candidates.push(path);
     }
 
     if let Ok(manifest_dir) = std::env::var("CARGO_MANIFEST_DIR") {
-        candidates.push(PathBuf::from(manifest_dir).join("sidecar/nodoc-sidecar.exe"));
+        candidates.push(PathBuf::from(manifest_dir).join("sidecar").join(name));
     }
 
     candidates
+}
+
+fn capture_sidecar_stderr(stderr: std::process::ChildStderr, log_path: PathBuf) {
+    thread::spawn(move || {
+        let parent = match log_path.parent() {
+            Some(parent) => parent,
+            None => return,
+        };
+        if fs::create_dir_all(parent).is_err() {
+            return;
+        }
+        let mut output = match fs::OpenOptions::new().create(true).append(true).open(&log_path) {
+            Ok(output) => output,
+            Err(_) => return,
+        };
+        for line in BufReader::new(stderr).lines().map_while(Result::ok) {
+            use std::io::Write;
+            let _ = writeln!(output, "{line}");
+        }
+    });
 }
 
 fn start_sidecar(app: &tauri::App) -> Result<(Child, u16, String), String> {
@@ -71,14 +97,24 @@ fn start_sidecar(app: &tauri::App) -> Result<(Child, u16, String), String> {
         .path()
         .app_local_data_dir()
         .map_err(|error| format!("Could not resolve app data directory: {error}"))?;
+    let resource_dir = app
+        .path()
+        .resource_dir()
+        .map_err(|error| format!("Could not resolve application resources: {error}"))?;
+    let log_path = data_dir.join("logs").join("sidecar-stderr.log");
 
     let mut child = Command::new(sidecar_path)
         .env("PRIVATEPDF_AUTH_TOKEN", &token)
-        .env("PRIVATEPDF_DATA_DIR", data_dir)
+        .env("PRIVATEPDF_DATA_DIR", &data_dir)
+        .env("PRIVATEPDF_RESOURCE_DIR", resource_dir)
         .stdout(Stdio::piped())
-        .stderr(Stdio::null())
+        .stderr(Stdio::piped())
         .spawn()
         .map_err(|error| format!("Could not start NoDoc sidecar: {error}"))?;
+
+    if let Some(stderr) = child.stderr.take() {
+        capture_sidecar_stderr(stderr, log_path);
+    }
 
     let stdout = child
         .stdout
